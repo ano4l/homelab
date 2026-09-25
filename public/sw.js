@@ -1,6 +1,6 @@
-const CACHE = 'vk-shell-v2';
+const CACHE = 'vk-shell-v4';
 self.addEventListener('install', (event) => {
-  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(['/','/index.html','/manifest.webmanifest'])));
+  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(['/','/index.html','/manifest.webmanifest','/icons/vk-app-icon.svg','/icons/vk-app-icon-192.png','/icons/vk-app-icon-512.png'])));
   self.skipWaiting();
 });
 self.addEventListener('activate', (event) => event.waitUntil(
