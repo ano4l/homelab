@@ -1,0 +1,11 @@
+{
+  "name": "VK Command Centre",
+  "short_name": "VK",
+  "description": "Personal intelligence command centre for projects, tasks, markets, news and sport.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#071013",
+  "theme_color": "#081014",
+  "orientation": "any",
+  "icons": []
+}
