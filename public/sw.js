@@ -1,7 +1,9 @@
-const CACHE = 'vk-shell-v4';
+// The production build supplies the version and all hashed build assets.
+const CACHE = 'vk-shell-__VK_BUILD__';
+const ASSETS = /* __VK_ASSETS__ */ [];
 self.addEventListener('install', (event) => {
-  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(['/','/index.html','/manifest.webmanifest','/icons/vk-app-icon.svg','/icons/vk-app-icon-192.png','/icons/vk-app-icon-512.png'])));
-  self.skipWaiting();
+  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(ASSETS)));
+  // Wait until current tabs close to avoid replacing the app during an edit.
 });
 self.addEventListener('activate', (event) => event.waitUntil(
   caches.keys().then((keys) => Promise.all(keys.filter((key) => key.startsWith('vk-shell-') && key !== CACHE).map((key) => caches.delete(key))))
@@ -13,15 +15,10 @@ self.addEventListener('fetch', (event) => {
   if (url.origin !== self.location.origin) return;
 
   if (event.request.mode === 'navigate') {
-    event.respondWith(fetch(event.request).catch(() => caches.match('/index.html')));
+    event.respondWith(caches.open(CACHE).then((cache) => cache.match('/index.html')).then((cached) => cached || fetch(event.request)));
     return;
   }
 
-  event.respondWith(caches.match(event.request).then((cached) => cached || fetch(event.request).then((response) => {
-    if (response.ok && response.type === 'basic') {
-      const copy = response.clone();
-      caches.open(CACHE).then((cache) => cache.put(event.request, copy));
-    }
-    return response;
-  }).catch(() => caches.match('/'))));
+  if (ASSETS.includes(url.pathname)) event.respondWith(caches.open(CACHE).then((cache) => cache.match(event.request)).then((cached) => cached || fetch(event.request)));
+  // API data and unknown paths are never cached as application assets.
 });

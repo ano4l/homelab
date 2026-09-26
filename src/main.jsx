@@ -1,312 +1,77 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import {
-  AlertTriangle, ArrowRight, Bell, Bitcoin, CalendarDays, Check, ChevronRight,
-  CircleDollarSign, Clock3, Command, FolderKanban, Github, GripHorizontal, Maximize2,
-  Menu, Plus, Radio, Server, Sparkles, Trophy, X
-} from 'lucide-react';
+import { ArrowRight, Bell, Check, ChevronRight, Clock3, ExternalLink, FolderKanban, Github, Menu, Plus, X, CalendarDays, RefreshCw, Trash2, Archive, RotateCcw, Sparkles } from 'lucide-react';
 import AnimatedSphere from './components/AnimatedSphere';
 import OptionWheel from './components/OptionWheel';
-import { checkSupabaseConnection, isSupabaseConfigured } from './lib/supabase';
+import { useWorkspace } from './lib/useWorkspace';
+import { uid, todayKey, formatDue, rankedTasks, attentionItems, planDay, nextEvent, completeTask, fetchGitHubActivity, safeUrl } from './lib/workspace';
 import './styles.css';
-
-const DAY = 86400000;
-const dateKey = (date) => date.toISOString().slice(0, 10);
-const shiftDate = (days) => dateKey(new Date(Date.now() + days * DAY));
-const localDateKey = (date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-function briefingCycleKey(date = new Date()) { const cycle = new Date(date); if (cycle.getHours() < 6) cycle.setDate(cycle.getDate() - 1); return localDateKey(cycle); }
-
-const seedProjects = [
-  { id: 1, name: 'VK Command Centre', progress: 68, status: 'Building', deadline: shiftDate(4) },
-  { id: 2, name: 'Atlas routing prototype', progress: 42, status: 'Planning', deadline: shiftDate(12) },
-  { id: 3, name: 'Forma workspace', progress: 86, status: 'Polishing', deadline: shiftDate(2) },
-];
-
-const seedTasks = [
-  { id: 1, title: 'Connect Supabase project schema', project: 'VK Command Centre', priority: 'High', due: shiftDate(0), done: false },
-  { id: 2, title: 'Review compact dashboard layout', project: 'VK Command Centre', priority: 'Medium', due: shiftDate(0), done: false },
-  { id: 3, title: 'Ship route fixture to staging', project: 'Atlas routing prototype', priority: 'High', due: shiftDate(1), done: false },
-  { id: 4, title: 'Confirm Forma release notes', project: 'Forma workspace', priority: 'Low', due: shiftDate(2), done: true },
-];
-
-const widgetDefaults = {
-  projects: { x: 2, y: 6, w: 25, h: 37 },
-  tasks: { x: 3, y: 56, w: 27, h: 38 },
-  briefing: { x: 71, y: 6, w: 27, h: 37 },
-  signals: { x: 77, y: 48, w: 21, h: 23 },
-  schedule: { x: 69, y: 74, w: 29, h: 19 },
-};
-const nodeItems = [
-  { label: 'Projects', icon: FolderKanban, area: 'projects', x: 18, y: 24 },
-  { label: 'Tasks', icon: Check, area: 'tasks', x: 15, y: 68 },
-  { label: 'Deadlines', icon: Clock3, area: 'tasks', x: 50, y: 88 },
-  { label: 'Briefing', icon: Sparkles, area: 'briefing', x: 83, y: 24 },
-  { label: 'Markets', icon: Bitcoin, area: 'signals', x: 86, y: 68 },
-  { label: 'Calendar', icon: CalendarDays, area: 'schedule', x: 50, y: 8 },
-];
-
-function usePersistentState(key, fallback) {
-  const [value, setValue] = useState(() => {
-    try { const stored = localStorage.getItem(key); return stored ? JSON.parse(stored) : fallback; }
-    catch { return fallback; }
-  });
-  useEffect(() => { localStorage.setItem(key, JSON.stringify(value)); }, [key, value]);
-  return [value, setValue];
+const stamp=()=>new Date().toISOString();
+const mins=n=>`${Math.floor(Math.max(0,n)/60)}h ${Math.max(0,n)%60}m`;
+const views=['Home','Inbox','Plan','Attention','Projects','Life','Settings'];
+function Link({url,children='Open source'}){const href=safeUrl(url);return href?<a href={href} target="_blank" rel="noreferrer" aria-label={children||'Open source'}>{children}<ExternalLink size={13}/></a>:null;}
+function Empty({children}){return <p className="empty">{children}</p>}
+function Field({label,children,wide=false}){return <label className={wide?'wide':''}><span>{label}</span>{children}</label>}
+function Dialog({title,children,onClose}){const ref=useRef();useEffect(()=>{const previous=document.activeElement,node=ref.current;(node.querySelector('input,textarea,select,.option-wheel')||node.querySelector('button'))?.focus();const key=e=>{if(e.key==='Escape'){e.stopPropagation();onClose()}if(e.key==='Tab'){const elements=[...node.querySelectorAll('button,input,textarea,select,a[href],summary,[tabindex]')].filter(x=>!x.disabled&&x.getClientRects().length),first=elements[0],last=elements.at(-1);if(e.shiftKey&&document.activeElement===first){e.preventDefault();last?.focus()}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first?.focus()}}};document.addEventListener('keydown',key);return()=>{document.removeEventListener('keydown',key);previous?.focus()}},[]);return <div className="modal-backdrop" onMouseDown={e=>{if(e.target===e.currentTarget)onClose()}}><section className="dialog" role="dialog" aria-modal="true" aria-label={title} ref={ref}><header><div><span className="eyebrow">VK / PERSONAL CONTROL POINT</span><h2>{title}</h2></div><button className="icon-button" aria-label="Close dialog" onClick={onClose}><X size={20}/></button></header>{children}</section></div>}
+function App(){
+ const ws=useWorkspace(),{data,update,saving,error}=ws;
+ const [unlocked,setUnlocked]=useState(()=>sessionStorage.getItem('vk-unlocked')==='yes'),[pinHash,setPinHash]=useState(()=>localStorage.getItem('vk-pin-hash'));
+ const [view,setView]=useState('Home'),[menu,setMenu]=useState(false),[dialog,setDialog]=useState(null),[thought,setThought]=useState(''),[message,setMessage]=useState(''),[undo,setUndo]=useState(null),[day,setDay]=useState(todayKey()),[kind,setKind]=useState('all'),[context,setContext]=useState('all'),[archived,setArchived]=useState(false),[refreshing,setRefreshing]=useState(''),[now,setNow]=useState(new Date());
+ useEffect(()=>{const id=setInterval(()=>setNow(new Date()),60000);return()=>clearInterval(id)},[]);
+ if(!unlocked)return <PinGate pinHash={pinHash} setPinHash={setPinHash} onUnlock={()=>{sessionStorage.setItem('vk-unlocked','yes');setUnlocked(true)}}/>;
+ if(!data)return <main className="loading"><strong>VK</strong><p>{error||'Opening your control point…'}</p>{error&&<button onClick={ws.retry}>Retry</button>}</main>;
+ const attention=attentionItems(data,now),plan=planDay(data,day,now),todayPlan=planDay(data,todayKey(),now),event=nextEvent(data.events,now),open=rankedTasks(data.tasks.filter(t=>!t.done),now),suggestion=todayPlan.suggestion,project=data.projects.find(p=>p.nextAction||p.checkpoint)||data.projects[0];
+ async function save(mutator,feedback='Saved on this device.'){const ok=await update(mutator);if(ok){setMessage(feedback);setUndo(null)}return ok}
+ async function capture(text,fields={}){if(!text.trim())return false;return save(d=>d.captures.unshift({id:uid(),kind:'thought',text:text.trim(),context:'Personal',projectId:null,sourceUrl:'',archived:false,createdAt:stamp(),updatedAt:stamp(),convertedTaskId:null,...fields}),'Saved to Inbox.')}
+ async function toggleTask(task){let spawned;const previousDone=task.done;if(await save(d=>{spawned=completeTask(d,task.id)},'Task updated.'))setUndo(()=>async()=>{if(await save(d=>{const t=d.tasks.find(x=>x.id===task.id);if(t)t.done=previousDone;if(spawned)d.tasks=d.tasks.filter(x=>x.id!==spawned)},'Task restored.'))setUndo(null)})}
+ async function remove(collection,id){const record=data[collection].find(x=>x.id===id),linkedTasks=collection==='projects'?data.tasks.filter(t=>t.projectId===id).map(t=>t.id):[];if(await save(d=>{d[collection]=d[collection].filter(x=>x.id!==id);if(collection==='projects')d.tasks.forEach(t=>{if(t.projectId===id)t.projectId=null})},'Removed. Undo is available.')){setDialog(null);setUndo(()=>async()=>{if(await save(d=>{if(!d[collection].some(x=>x.id===id))d[collection].push(record);if(collection==='projects')d.tasks.forEach(t=>{if(linkedTasks.includes(t.id)&&!t.projectId)t.projectId=id})},'Restored.'))setUndo(null)})}}
+ const taskEditor=(task=null,extra={})=>setDialog({type:'task',record:task,...extra});
+ function openAttention(item){const type={task:'task',project:'project',event:'event',alert:'alert'}[item.kind],collection={task:'tasks',project:'projects',event:'events',alert:'alerts'}[item.kind];setDialog({type,record:data[collection].find(x=>x.id===item.targetId)})}
+ async function refresh(connection){setRefreshing(connection.id);try{const result=await fetchGitHubActivity(connection.repository);await save(d=>{const c=d.connections.find(x=>x.id===connection.id);if(!c)return;c.status='connected';c.lastSuccessAt=result.fetchedAt;c.error='';for(const alert of result.alerts){const existing=d.alerts.find(x=>x.id===alert.id);if(existing)Object.assign(existing,{title:alert.title,reason:alert.reason,sourceUrl:alert.sourceUrl,priority:alert.priority,updatedAt:stamp()});else d.alerts.push({...alert,connectionId:c.id})}for(const id of result.resolvedIds||[]){const a=d.alerts.find(x=>x.id===id&&x.connectionId===c.id);if(a)a.dismissed=true}},'GitHub activity refreshed.')}catch(e){await save(d=>{const c=d.connections.find(x=>x.id===connection.id);if(c){c.status='error';c.error=e.message}},'Refresh failed; previous activity retained.')}finally{setRefreshing('')}}
+ function taskRows(tasks){return tasks.length?<div className="record-list">{tasks.map(t=><div className={`task-row ${t.done?'completed':''}`} key={t.id}><button className="check-button" aria-label={t.done?`Reopen ${t.title}`:`Complete ${t.title}`} onClick={()=>toggleTask(t)}>{t.done&&<Check size={15}/>}</button><button className="record-open" onClick={()=>taskEditor(t)}><strong>{t.title}</strong><small>{t.context} · {formatDue(t.deadline)}{t.estimateMinutes?` · ${t.estimateMinutes} min`:''}{t.recurrence!=='none'?` · ${t.recurrence}`:''}</small></button><span className={`priority ${t.priority?.toLowerCase()}`}>{t.priority}</span></div>)}</div>:<Empty>No tasks here. Give yourself one clear next step.</Empty>}
+ function attentionRows(items){return items.length?<div className="record-list">{items.map(a=><div className="attention-row" key={a.id}><span className={`attention-dot ${a.priority?.toLowerCase()}`}/><button className="record-open" onClick={()=>openAttention(a)}><strong>{a.title}</strong><small>{a.reason} · {a.source}</small></button><div className="row-actions">{a.kind==='alert'&&<><button aria-label={`Snooze ${a.title} for one day`} onClick={()=>save(d=>{d.alerts.find(x=>x.id===a.targetId).snoozedUntil=new Date(Date.now()+86400000).toISOString()},'Snoozed for one day.')}><Clock3 size={15}/></button><button aria-label={`Dismiss ${a.title}`} onClick={()=>save(d=>{d.alerts.find(x=>x.id===a.targetId).dismissed=true},'Dismissed.')}><Check size={15}/></button></>}<Link url={a.sourceUrl} children=""/></div></div>)}</div>:<Empty>Nothing needs your attention right now.</Empty>}
+ return <div className="vk-app"><header className="vk-topbar"><button className="icon-button" aria-label="Open navigation" onClick={()=>setMenu(true)}><Menu size={21}/></button><button className="brand" onClick={()=>setView('Home')}>VK<span>PERSONAL CONTROL POINT</span></button><span className="top-status">{attention.length?`${attention.length} need attention`:'Clear to focus'}</span><time>{now.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</time><button className="icon-button" aria-label="Open attention queue" onClick={()=>setView('Attention')}><Bell size={18}/>{attention.length>0&&<i/>}</button><button className="primary" onClick={()=>setDialog({type:'capture'})}><Plus size={16}/>Capture</button></header>
+ {error&&<div className="error-banner" role="alert">{error}<button onClick={ws.retry}>Retry storage</button></div>}
+ <main className="workspace"><div className="page-title"><div><span className="eyebrow">{now.toLocaleDateString([],{weekday:'long',day:'numeric',month:'long'})}</span><h1>{view==='Home'?'Room for what matters.':view}</h1></div>{view!=='Home'&&<button className="quiet" onClick={()=>setView('Home')}>Home<ArrowRight size={15}/></button>}</div>
+ {view==='Home'&&<><div className="home-grid"><section className="home-next"><span className="eyebrow">YOUR NEXT MOVE</span><h2>{suggestion?.title||event?.title||'A clear place to begin.'}</h2><p>{suggestion?`${suggestion.estimateMinutes} min · ${suggestion.context} · Fits your available time`:event?`${formatDue(event.day)} at ${event.start}`:'Capture a thought, plan your day, or pick up a project.'}</p><button className="quiet" onClick={()=>suggestion?taskEditor(suggestion):setView('Plan')}>{suggestion?'Review task':'Open plan'}<ArrowRight size={15}/></button><div className="next-commitment"><CalendarDays size={17}/><div><span>Next commitment</span><strong>{event?`${event.start} · ${event.title}`:'No upcoming commitments'}</strong>{event&&<small>{formatDue(event.day)}</small>}</div></div></section><button className="orb-button" onClick={()=>setView('Attention')} aria-label="Open current attention briefing"><AnimatedSphere className="live-sphere" interactive particleColor={attention.length?'150, 82, 43':'18, 18, 22'} intensity={.8}/><span><b>VK</b><small>{attention.length?`${attention.length} NEED ATTENTION`:'READY WHEN YOU ARE'}</small></span></button><section className="home-attention"><div className="section-head"><span className="eyebrow">ATTENTION / {attention.length}</span><button className="text-button" onClick={()=>setView('Attention')}>View all<ChevronRight size={14}/></button></div>{attentionRows(attention.slice(0,3))}</section></div>
+ <form className="thought-composer" onSubmit={async e=>{e.preventDefault();if(await capture(thought))setThought('')}}><div><Sparkles size={19}/><span className="eyebrow">GET IT OUT OF YOUR HEAD</span></div><div className="thought-input"><textarea aria-label="Thought" placeholder="Save a thought…" rows={2} value={thought} onChange={e=>setThought(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.nativeEvent.isComposing){e.preventDefault();if(!saving&&thought.trim())e.currentTarget.form.requestSubmit()}}}/><button className="primary" disabled={saving||!thought.trim()}>Save thought<ArrowRight size={16}/></button></div><p>No project. No deadline. Just a thought. <button type="button" className="text-button" onClick={()=>setView('Inbox')}>Open Inbox<ArrowRight size={12}/></button></p></form>
+ <div className="home-bottom"><section><div className="section-head"><span className="eyebrow">TODAY / REALISTIC CAPACITY</span><button className="text-button" onClick={()=>setView('Plan')}>Plan day<ChevronRight size={14}/></button></div><div className="capacity"><strong>{mins(todayPlan.capacityMinutes)}</strong><span>available focus time</span><b className={todayPlan.overloaded?'danger':''}>{mins(todayPlan.plannedMinutes)} planned</b></div><p>{todayPlan.overloaded?'Your plan exceeds available time. Move a task to another day.':todayPlan.unknownEstimates?`${todayPlan.unknownEstimates} tasks need estimates before your plan is complete.`:`${mins(todayPlan.remainingMinutes)} remains unallocated.`}</p></section><section><span className="eyebrow">PICK UP WHERE YOU LEFT OFF</span>{project?<><h3>{project.name}</h3><p>{project.blocker?`Blocked: ${project.blocker}`:project.nextAction||project.checkpoint||'Save a checkpoint to make returning easier.'}</p><button className="quiet" onClick={()=>setDialog({type:'project',record:project})}>Resume project<ArrowRight size={15}/></button></>:<><p>Keep next actions and checkpoints with your projects.</p><button className="quiet" onClick={()=>setDialog({type:'project'})}>Add project<Plus size={15}/></button></>}</section></div></>}
+ {view==='Inbox'&&<><div className="toolbar"><select aria-label="Capture type filter" value={kind} onChange={e=>setKind(e.target.value)}>{['all','thought','task','link','reminder'].map(x=><option key={x} value={x}>{x==='all'?'All types':x}</option>)}</select><select aria-label="Context filter" value={context} onChange={e=>setContext(e.target.value)}>{['all','Personal','Work','Study'].map(x=><option key={x} value={x}>{x==='all'?'All contexts':x}</option>)}</select><button className={archived?'selected quiet':'quiet'} onClick={()=>setArchived(!archived)}><Archive size={15}/>{archived?'Archived':'Active inbox'}</button><button className="primary" onClick={()=>setDialog({type:'capture'})}><Plus size={15}/>Save a thought</button></div><div className="inbox-list">{data.captures.filter(c=>c.archived===archived&&(kind==='all'||c.kind===kind)&&(context==='all'||c.context===context)).map(c=><article className="inbox-record" key={c.id}><div><span className="eyebrow">{c.kind} / {c.context} · {new Date(c.createdAt).toLocaleDateString()}</span><button className="capture-text" onClick={()=>setDialog({type:'capture',record:c})}>{c.text}</button><Link url={c.sourceUrl}/>{c.convertedTaskId&&<small className="converted">Converted to task · Original thought preserved</small>}</div><div className="capture-actions"><button className="quiet" onClick={()=>setDialog({type:'capture',record:c})}>Edit</button>{!c.convertedTaskId&&<button className="quiet" onClick={()=>taskEditor(null,{capture:c})}>Make task<ArrowRight size={13}/></button>}<button className="icon-button" aria-label={c.archived?'Restore capture':'Archive capture'} onClick={()=>save(d=>{const x=d.captures.find(x=>x.id===c.id);x.archived=!x.archived;x.updatedAt=stamp()})}>{c.archived?<RotateCcw size={17}/>:<Archive size={17}/>}</button><button className="icon-button" aria-label="Delete capture" onClick={()=>remove('captures',c.id)}><Trash2 size={16}/></button></div></article>)}{!data.captures.some(c=>c.archived===archived&&(kind==='all'||c.kind===kind)&&(context==='all'||c.context===context))&&<Empty>{archived?'No archived captures.':'Your thoughts have a home here. Save one now; decide what it means later.'}</Empty>}</div></>}
+ {view==='Plan'&&<><div className="toolbar"><input aria-label="Planning date" type="date" value={day} onChange={e=>setDay(e.target.value||todayKey())}/><button className="quiet" onClick={()=>setDay(todayKey())}>Today</button><button className="quiet" onClick={()=>setDialog({type:'event',day})}><Plus size={15}/>Commitment</button><button className="primary" onClick={()=>taskEditor(null,{scheduledDay:day})}><Plus size={15}/>Plan task</button><button className="text-button" onClick={()=>setView('Settings')}>Working hours</button></div><div className="plan-summary"><div><span className="eyebrow">AVAILABLE FOCUS TIME</span><strong>{mins(plan.capacityMinutes)}</strong></div><div><span className="eyebrow">PLANNED</span><strong>{mins(plan.plannedMinutes)}</strong></div><div><span className="eyebrow">{plan.overloaded?'OVER CAPACITY':'UNALLOCATED'}</span><strong className={plan.overloaded?'danger':''}>{mins(Math.abs(plan.remainingMinutes))}</strong></div></div>{plan.unknownEstimates>0&&<p className="notice">{plan.unknownEstimates} planned tasks have no estimate. Add estimates to see a reliable total.</p>}{plan.overloaded&&<p className="notice danger">The day is over capacity. Open a task to reschedule or adjust its estimate.</p>}<div className="split-grid"><section><h2>Commitments</h2>{plan.events.length?plan.events.map(e=><div className="event-row" key={e.id}><time>{e.start}<small>{e.end}</small></time><button className="record-open" onClick={()=>setDialog({type:'event',record:e})}><strong>{e.title}</strong><small>Fixed commitment</small></button><Link url={e.sourceUrl} children=""/></div>):<Empty>No commitments on this day.</Empty>}<h2 className="subheading">Free windows</h2><div className="windows">{plan.windows.length?plan.windows.map((w,i)=><span key={i}>{w.start}–{w.end}<small>{w.minutes} min</small></span>):<Empty>No focus windows remain.</Empty>}</div><p className="fine-print">Includes {data.settings.bufferMinutes} minutes around commitments. Today's capacity starts from the current time.</p></section><section><h2>Planned tasks</h2>{taskRows(plan.tasks)}<h2 className="subheading">Ready to schedule</h2>{plan.unscheduled.slice(0,8).map(t=><div className="schedule-task" key={t.id}><button className="record-open" onClick={()=>taskEditor(t)}><strong>{t.title}</strong><small>{t.estimateMinutes?`${t.estimateMinutes} min`:'Estimate needed'} · {t.context}</small></button><button className="quiet" onClick={()=>save(d=>{const x=d.tasks.find(x=>x.id===t.id);x.scheduledDay=day;x.updatedAt=stamp()},'Task scheduled.')}>Add<Plus size={14}/></button></div>)}{!plan.unscheduled.length&&<Empty>No unscheduled tasks.</Empty>}</section></div></>}
+ {view==='Attention'&&<><div className="toolbar"><p className="toolbar-copy">Decisions, deadlines, blockers, and source activity.</p><button className="primary" onClick={()=>setDialog({type:'alert'})}><Plus size={15}/>Add attention item</button></div>{attentionRows(attention)}<div className="section-head subheading"><h2>Connected sources</h2><button className="quiet" onClick={()=>setDialog({type:'connection'})}><Github size={16}/>Add GitHub repository</button></div><p className="fine-print">Latest 50 public repository issue/PR updates, refreshed on request. Calendar commitments are entered manually.</p>{data.connections.map(c=><article className="connection-row" key={c.id}><Github size={22}/><div><strong>{c.repository}</strong><small>{c.lastSuccessAt?`Last refreshed ${new Date(c.lastSuccessAt).toLocaleString()}`:'Not refreshed yet'} · {c.status}</small>{c.error&&<p className="danger">{c.error}</p>}</div><button className="quiet" disabled={refreshing===c.id} onClick={()=>refresh(c)}><RefreshCw size={15}/>{refreshing===c.id?'Refreshing…':'Refresh'}</button><button className="icon-button" aria-label={`Remove ${c.repository} connection`} onClick={()=>save(d=>{d.connections=d.connections.filter(x=>x.id!==c.id);d.alerts=d.alerts.filter(x=>x.connectionId!==c.id)},'Source removed.')}><Trash2 size={16}/></button></article>)}{!data.connections.length&&<Empty>Connect a public GitHub repository or add a source-linked item yourself.</Empty>}<details className="subheading"><summary>Snoozed and dismissed source items</summary>{data.alerts.filter(a=>a.dismissed||a.snoozedUntil&&new Date(a.snoozedUntil)>now).map(a=><div className="schedule-task" key={a.id}><span>{a.title}<small>{a.dismissed?'Dismissed':`Snoozed until ${new Date(a.snoozedUntil).toLocaleString()}`}</small></span><button className="quiet" onClick={()=>save(d=>{const x=d.alerts.find(x=>x.id===a.id);x.dismissed=false;x.snoozedUntil=null},'Returned to attention.')}>Restore</button></div>)}</details></>}
+ {view==='Projects'&&<><div className="toolbar"><p className="toolbar-copy">A next action, a checkpoint, and a clear way back in.</p><button className="primary" onClick={()=>setDialog({type:'project'})}><Plus size={15}/>Add project</button></div><div className="projects-list">{data.projects.map(p=>{const milestones=p.milestones||[],done=milestones.filter(m=>m.done).length;return <article className="project-card" key={p.id}><div className="section-head"><span className="eyebrow">{p.status}{p.deadline?` / ${formatDue(p.deadline)}`:''}</span><FolderKanban size={18}/></div><h2>{p.name}</h2>{p.blocker&&<p className="danger">Blocked: {p.blocker}</p>}<p>{p.nextAction||'Add a concrete next action.'}</p><div className="milestone-progress"><i style={{width:`${milestones.length?done/milestones.length*100:0}%`}}/></div><small>{done}/{milestones.length} milestones complete</small>{p.checkpoint&&<blockquote>{p.checkpoint}</blockquote>}<div className="toolbar"><button className="quiet" onClick={()=>setDialog({type:'project',record:p})}>Resume & edit<ArrowRight size={15}/></button><Link url={p.resourceUrl} children="Open resource"/></div></article>})}</div>{!data.projects.length&&<Empty>Add a project to remember exactly where to continue.</Empty>}</>}
+ {view==='Life'&&<><div className="toolbar"><p className="toolbar-copy">Personal commitments, study, and recurring obligations.</p><button className="primary" onClick={()=>taskEditor(null,{context:'Personal'})}><Plus size={15}/>Add obligation</button></div><div className="split-grid"><section><h2>Personal</h2>{taskRows(rankedTasks(data.tasks.filter(t=>t.context==='Personal'&&!t.done),now))}</section><section><h2>Study</h2>{taskRows(rankedTasks(data.tasks.filter(t=>t.context==='Study'&&!t.done),now))}</section></div><details className="subheading"><summary>Completed personal and study tasks</summary>{taskRows(data.tasks.filter(t=>t.done&&t.context!=='Work'))}</details><div className="subheading"><div className="section-head"><h2>Work tasks</h2><button className="quiet" onClick={()=>taskEditor(null,{context:'Work'})}>Add work task<Plus size={14}/></button></div>{taskRows(open.filter(t=>t.context==='Work'))}<details><summary>Completed work tasks</summary>{taskRows(data.tasks.filter(t=>t.done&&t.context==='Work'))}</details></div></>}
+ {view==='Settings'&&<Settings data={data} save={save} ws={ws} saving={saving}/>}
+ </main><footer className="vk-footer"><span>LOCAL DEVICE STORAGE · {saving?'SAVING…':'YOUR DATA, HERE'}</span><button onClick={()=>setView('Settings')}>Back up & settings</button><button onClick={()=>{sessionStorage.removeItem('vk-unlocked');setUnlocked(false)}}>Lock VK</button></footer>
+ {message&&<div className="save-feedback" role="status"><span>{message}</span>{undo&&<button onClick={undo}>Undo</button>}<button aria-label="Dismiss saved feedback" onClick={()=>{setMessage('');setUndo(null)}}><X size={15}/></button></div>}
+ {menu&&<Dialog title="Choose a space." onClose={()=>setMenu(false)}><div className="wheel-wrap"><OptionWheel items={views} defaultSelected={Math.max(0,views.indexOf(view))} side="right" fontSize={2.1} spacing={1.4} tilt={7} curve={1.1} blur={.18} fade={.14} minOpacity={.28} inset={60} textColor="#68686e" activeColor="#121216" onSelect={(_,item)=>{setView(item);setMenu(false)}}/></div><p className="fine-print">Scroll or drag · Enter to open</p></Dialog>}
+ {dialog&&<Editor key={`${dialog.type}-${dialog.record?.id||'new'}`} config={dialog} data={data} saving={saving} save={save} capture={capture} remove={remove} onClose={()=>setDialog(null)} afterConnection={refresh}/>}
+ </div>;
 }
-
-function App() {
-  const [pinHash, setPinHash] = useState(() => localStorage.getItem('vk-pin-hash') || '');
-  const [unlocked, setUnlocked] = useState(() => sessionStorage.getItem('vk-unlocked') === 'true');
-  const [projects, setProjects] = usePersistentState('vk-projects', seedProjects);
-  const [tasks, setTasks] = usePersistentState('vk-tasks', seedTasks);
-  const [widgets, setWidgets] = usePersistentState('vk-widget-layout', widgetDefaults);
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [captureOpen, setCaptureOpen] = useState(false);
-  const [briefingGate, setBriefingGate] = useState(() => localStorage.getItem('vk-last-briefing-cycle') !== briefingCycleKey());
-  const [expandedWidget, setExpandedWidget] = useState(() => localStorage.getItem('vk-last-briefing-cycle') !== briefingCycleKey() ? 'briefing' : null);
-  const [focusArea, setFocusArea] = useState('briefing');
-  const [activity, setActivity] = useState('VK started monitoring your workspace.');
-  const [now, setNow] = useState(new Date());
-  const [cloudStatus, setCloudStatus] = useState(isSupabaseConfigured ? 'checking' : 'local');
-
-  useEffect(() => { const timer = setInterval(() => setNow(new Date()), 30000); return () => clearInterval(timer); }, []);
-  useEffect(() => {
-    if (!isSupabaseConfigured) return undefined;
-    let active = true;
-    checkSupabaseConnection()
-      .then(() => { if (active) setCloudStatus('connected'); })
-      .catch(() => { if (active) setCloudStatus('unreachable'); });
-    return () => { active = false; };
-  }, []);
-  useEffect(() => {
-    if (!unlocked) return;
-    const cycle = briefingCycleKey(now);
-    if (localStorage.getItem('vk-last-briefing-cycle') !== cycle) { setBriefingGate(true); setExpandedWidget('briefing'); }
-  }, [now, unlocked]);
-  useEffect(() => {
-    if (localStorage.getItem('vk-widget-size-version') === '3') return;
-    setWidgets((items) => Object.fromEntries(Object.entries(items).map(([id, box]) => {
-      const heightBoost = { projects: 6, tasks: 7, briefing: 6, signals: 3, schedule: 3 }[id] || 0;
-      const w = Math.min(31, box.w + (id === 'tasks' ? 2 : 0)); const h = Math.min(46, box.h + heightBoost);
-      return [id, { ...box, x: Math.min(box.x, 98 - w), y: Math.min(box.y, 97 - h), w, h }];
-    })));
-    localStorage.setItem('vk-widget-size-version', '3');
-  }, [setWidgets]);
-  useEffect(() => {
-    const close = (event) => { if (event.key === 'Escape') { setMenuOpen(false); setCaptureOpen(false); } };
-    window.addEventListener('keydown', close); return () => window.removeEventListener('keydown', close);
-  }, []);
-
-  const system = useMemo(() => {
-    const today = dateKey(now); const pending = tasks.filter((task) => !task.done);
-    const overdue = pending.filter((task) => task.due < today).length;
-    const dueToday = pending.filter((task) => task.due === today).length;
-    const high = pending.filter((task) => task.priority === 'High').length;
-    const score = overdue * 5 + dueToday * 3 + high;
-    if (score >= 8) return { level: 'critical', label: 'Needs attention', color: '181, 55, 52', intensity: 1.8, score, message: `${overdue + dueToday} urgent item${overdue + dueToday === 1 ? '' : 's'} need a decision.` };
-    if (score >= 3) return { level: 'watch', label: 'Active watch', color: '179, 105, 38', intensity: 1.25, score, message: `${dueToday} due today · ${high} high priority.` };
-    return { level: 'clear', label: 'System clear', color: '18, 18, 22', intensity: .75, score, message: 'No urgent work is competing for attention.' };
-  }, [tasks, now]);
-
-  const pendingTasks = tasks.filter((task) => !task.done);
-  const nextDeadline = [...pendingTasks].sort((a, b) => a.due.localeCompare(b.due))[0];
-  const avgProgress = Math.round(projects.reduce((sum, item) => sum + item.progress, 0) / Math.max(projects.length, 1));
-  const dateLabel = new Intl.DateTimeFormat('en-ZA', { weekday: 'short', day: '2-digit', month: 'short' }).format(now);
-  const timeLabel = new Intl.DateTimeFormat('en-ZA', { hour: '2-digit', minute: '2-digit', hour12: false }).format(now);
-
-  function log(message) { setActivity(message); }
-  function toggleTask(id) {
-    const task = tasks.find((item) => item.id === id);
-    setTasks((items) => items.map((item) => item.id === id ? { ...item, done: !item.done } : item));
-    log(`${task?.title || 'Task'} ${task?.done ? 'reopened' : 'completed'}.`);
-  }
-  function bumpProject(id) {
-    const project = projects.find((item) => item.id === id);
-    setProjects((items) => items.map((item) => item.id === id ? { ...item, progress: Math.min(100, item.progress + 5) } : item));
-    log(`${project?.name || 'Project'} moved forward by 5%.`);
-  }
-  function focus(area, label) { setFocusArea(area); log(`${label} brought into focus.`); }
-  function moveWidget(id, position) { setWidgets((items) => ({ ...items, [id]: { ...items[id], ...position } })); }
-  function closeExpandedWidget() {
-    if (expandedWidget === 'briefing' && briefingGate) { localStorage.setItem('vk-last-briefing-cycle', briefingCycleKey(now)); setBriefingGate(false); }
-    setExpandedWidget(null);
-  }
-  const widgetSeverity = {
-    projects: projects.some((project) => project.deadline <= shiftDate(2) && project.progress < 90) ? 'watch' : 'clear',
-    tasks: system.level,
-    briefing: system.level,
-    signals: 'idle',
-    schedule: nextDeadline?.due === dateKey(now) ? 'watch' : 'clear',
-  };
-
-  if (!unlocked) return <PinGate pinHash={pinHash} setPinHash={setPinHash} onUnlock={() => { sessionStorage.setItem('vk-unlocked', 'true'); setUnlocked(true); }} />;
-
-  return <div className={`vk-app state-${system.level}`}>
-    <header className="vk-topbar">
-      <button className="hamburger" onClick={() => setMenuOpen(true)} aria-label="Open command wheel"><Menu size={19} /></button>
-      <div className="vk-wordmark"><span>VK</span><small>PERSONAL INTELLIGENCE</small></div>
-      <div className="top-status"><i /><span>{system.label}</span><b>{system.score.toString().padStart(2, '0')}</b></div>
-      <div className="top-time"><span>{dateLabel}</span><strong>{timeLabel}</strong></div>
-      <button className="top-icon" aria-label="Notifications"><Bell size={17} /><i /></button>
-      <button className="capture-button" onClick={() => setCaptureOpen(true)}><Plus size={16} /> Capture</button>
-    </header>
-
-    <main className="open-plan" aria-label="VK open plan dashboard">
-      <div className="open-core">
-        <button className="open-sphere" onClick={() => { setExpandedWidget('briefing'); focus('briefing', 'VK'); }} aria-label="Interact with VK and expand briefing">
-          <span className="sphere-halo halo-one" /><span className="sphere-halo halo-two" />
-          <AnimatedSphere className="live-sphere" particleColor="18, 18, 22" intensity={system.intensity} interactive />
-        </button>
-        <div className="core-readout"><strong>{system.message}</strong><small>{activity}</small></div>
-      </div>
-
-      <MovableWidget id="projects" box={widgets.projects} severity={widgetSeverity.projects} eyebrow={`${projects.length} ACTIVE`} title="Projects" icon={<FolderKanban size={14} />} onMove={moveWidget} onExpand={setExpandedWidget}>
-        <div className="compact-projects">{projects.map((project) => <div className="project-item" key={project.id}><div className="item-line"><strong>{project.name}</strong><button onClick={() => bumpProject(project.id)}>+5%</button></div><div className="progress"><i style={{ width: `${project.progress}%` }} /></div><div className="item-meta"><span>{project.status}</span><span>{project.progress}%</span></div></div>)}</div>
-      </MovableWidget>
-
-      <MovableWidget id="tasks" box={widgets.tasks} severity={widgetSeverity.tasks} eyebrow={`${pendingTasks.length} OPEN`} title="Tasks & deadlines" icon={<Check size={14} />} onMove={moveWidget} onExpand={setExpandedWidget}>
-        <div className="compact-tasks">{pendingTasks.slice(0, 4).map((task) => <button className="task-item" key={task.id} onClick={() => toggleTask(task.id)}><span className="checkmark" /><span className="task-copy"><strong>{task.title}</strong><small>{formatDue(task.due)} · {task.project}</small></span><span className={`priority p-${task.priority.toLowerCase()}`}>{task.priority[0]}</span></button>)}</div>
-      </MovableWidget>
-
-      <MovableWidget id="briefing" box={widgets.briefing} severity={widgetSeverity.briefing} eyebrow="LIVE BRIEFING" title="What matters now" icon={<Sparkles size={14} />} onMove={moveWidget} onExpand={setExpandedWidget}>
-        <div className="briefing-content"><p>{system.level === 'critical' ? 'Clear urgent work before opening another lane.' : 'Your workspace is moving without major blockers.'}</p><div className="brief-stats"><div><strong>{pendingTasks.length}</strong><span>open</span></div><div><strong>{avgProgress}%</strong><span>progress</span></div><div><strong>{nextDeadline ? formatDue(nextDeadline.due) : '—'}</strong><span>next due</span></div></div>{nextDeadline && <button className="suggestion" onClick={() => setExpandedWidget('tasks')}><AlertTriangle size={13} /><span><small>VK SUGGESTS</small><strong>{nextDeadline.title}</strong></span><ChevronRight size={13} /></button>}</div>
-      </MovableWidget>
-
-      <MovableWidget id="signals" box={widgets.signals} severity={widgetSeverity.signals} eyebrow="MARKETS" title="Signals" icon={<CircleDollarSign size={14} />} onMove={moveWidget} onExpand={setExpandedWidget} compact>
-        <div className="connection-state"><Bitcoin size={14} /><div><strong>BTC · XAUUSD</strong><small>Feed not connected</small></div><span>SET UP</span></div>
-      </MovableWidget>
-
-      <MovableWidget id="schedule" box={widgets.schedule} severity={widgetSeverity.schedule} eyebrow="CALENDAR" title="Schedule" icon={<CalendarDays size={14} />} onMove={moveWidget} onExpand={setExpandedWidget} compact>
-        <div className="schedule-row"><div><strong>10:30</strong><span>Architecture review</span></div><div><strong>{nextDeadline ? formatDue(nextDeadline.due) : 'Clear'}</strong><span>Next deadline</span></div></div>
-      </MovableWidget>
-
-    </main>
-
-    <main className="control-grid legacy-layout" hidden>
-      <section className={`rail left-rail ${focusArea === 'projects' || focusArea === 'tasks' ? 'focused' : ''}`}>
-        <Panel id="projects" eyebrow={`${projects.length} ACTIVE`} title="Project momentum" icon={<FolderKanban size={15} />} onFocus={() => setFocusArea('projects')}>
-          <div className="compact-projects">{projects.map((project) => <div className="project-item" key={project.id}>
-            <div className="item-line"><strong>{project.name}</strong><button onClick={() => bumpProject(project.id)}>+5%</button></div>
-            <div className="progress"><i style={{ width: `${project.progress}%` }} /></div>
-            <div className="item-meta"><span>{project.status}</span><span>{project.progress}%</span></div>
-          </div>)}</div>
-        </Panel>
-        <Panel id="tasks" eyebrow={`${pendingTasks.length} OPEN`} title="Today’s work" icon={<Check size={15} />} onFocus={() => setFocusArea('tasks')}>
-          <div className="compact-tasks">{tasks.slice(0, 5).map((task) => <button className={`task-item ${task.done ? 'done' : ''}`} key={task.id} onClick={() => toggleTask(task.id)}>
-            <span className="checkmark">{task.done && <Check size={11} />}</span><span className="task-copy"><strong>{task.title}</strong><small>{task.project}</small></span><span className={`priority p-${task.priority.toLowerCase()}`}>{task.priority[0]}</span>
-          </button>)}</div>
-        </Panel>
-      </section>
-
-      <section className="intelligence-core">
-        <div className="core-heading"><span>VK / ACTIVE AWARENESS</span><strong>{system.message}</strong></div>
-        <div className="core-map">
-          <svg className="core-links" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">{nodeItems.map((node) => <line key={node.label} x1="50" y1="50" x2={node.x} y2={node.y} />)}</svg>
-          {nodeItems.map(({ label, icon: Icon, area, x, y }) => <button key={label} className={`core-node ${focusArea === area ? 'active' : ''}`} style={{ '--x': `${x}%`, '--y': `${y}%` }} onClick={() => focus(area, label)}><Icon size={14} /><span>{label}</span>{area === 'tasks' && pendingTasks.length > 0 && <b>{pendingTasks.length}</b>}</button>)}
-          <button className="sphere-shell" onClick={() => focus('briefing', 'VK')} aria-label="Open VK briefing">
-            <span className="sphere-halo halo-one" /><span className="sphere-halo halo-two" />
-            <AnimatedSphere className="live-sphere" particleColor={system.color} intensity={system.intensity} />
-            <span className="sphere-label"><strong>VK</strong><small>{system.label}</small></span>
-          </button>
-        </div>
-        <div className="activity-strip"><span><Radio size={12} /> LIVE</span><p>{activity}</p><time>{timeLabel}</time></div>
-      </section>
-
-      <section className={`rail right-rail ${['briefing', 'signals', 'schedule'].includes(focusArea) ? 'focused' : ''}`}>
-        <Panel id="briefing" eyebrow="DAILY BRIEFING" title="What matters now" icon={<Sparkles size={15} />} onFocus={() => setFocusArea('briefing')}>
-          <div className="briefing-content"><p>{system.level === 'critical' ? 'Clear the urgent work before opening another lane.' : 'Your workspace is moving without major blockers.'}</p>
-            <div className="brief-stats"><div><strong>{pendingTasks.length}</strong><span>open tasks</span></div><div><strong>{avgProgress}%</strong><span>avg progress</span></div><div><strong>{nextDeadline ? formatDue(nextDeadline.due) : '—'}</strong><span>next due</span></div></div>
-            {nextDeadline && <button className="suggestion" onClick={() => setFocusArea('tasks')}><AlertTriangle size={14} /><span><small>VK SUGGESTS</small><strong>{nextDeadline.title}</strong></span><ChevronRight size={14} /></button>}
-          </div>
-        </Panel>
-        <div className="mini-panel-row">
-          <Panel id="signals" eyebrow="MARKETS" title="Signals" icon={<CircleDollarSign size={15} />} onFocus={() => setFocusArea('signals')} compact>
-            <div className="connection-state"><Bitcoin size={15} /><div><strong>BTC · XAUUSD</strong><small>Feed not connected</small></div><span>SET UP</span></div>
-          </Panel>
-          <Panel id="schedule" eyebrow="CALENDAR" title="Next up" icon={<CalendarDays size={15} />} onFocus={() => setFocusArea('schedule')} compact>
-            <div className="next-event"><strong>10:30</strong><span>Architecture review</span></div>
-          </Panel>
-        </div>
-        <Panel id="connections" eyebrow="CONNECTIONS" title="External activity" icon={<Server size={15} />}>
-          <div className="connections"><div><Github size={14} /><span>GitHub</span><small>Not connected</small></div><div><Server size={14} /><span>Vercel</span><small>Not connected</small></div><div><Trophy size={14} /><span>Sports</span><small>Not connected</small></div></div>
-        </Panel>
-      </section>
-    </main>
-
-    <footer className="vk-footer"><span className={`cloud-state ${cloudStatus}`}><i />{cloudStatus === 'connected' ? 'SUPABASE CONNECTED · LOCAL-FIRST' : cloudStatus === 'checking' ? 'CHECKING SUPABASE · LOCAL-FIRST' : cloudStatus === 'unreachable' ? 'SUPABASE OFFLINE · SAVED LOCALLY' : 'LOCAL-FIRST · SAVED ON THIS DEVICE'}</span><button onClick={() => { sessionStorage.removeItem('vk-unlocked'); setUnlocked(false); }}>LOCK VK</button></footer>
-    {menuOpen && <CommandMenu current={focusArea} onClose={() => setMenuOpen(false)} onSelect={(item) => { const area = item.toLowerCase(); setFocusArea(area); setExpandedWidget(area); setMenuOpen(false); log(`${item} opened from command wheel.`); }} />}
-    {captureOpen && <QuickCapture projects={projects} onClose={() => setCaptureOpen(false)} onAdd={(task) => { setTasks((items) => [{ ...task, id: Date.now(), done: false }, ...items]); setCaptureOpen(false); setFocusArea('tasks'); log(`${task.title} added as ${task.priority.toLowerCase()} priority.`); }} />}
-    {expandedWidget && <ExpandedWidget id={expandedWidget} projects={projects} tasks={tasks} system={system} nextDeadline={nextDeadline} avgProgress={avgProgress} dailyBriefing={briefingGate} onClose={closeExpandedWidget} onToggleTask={toggleTask} onBumpProject={bumpProject} />}
-  </div>;
+function Editor({config,data,saving,save,capture,remove,onClose,afterConnection}){
+ const {type,record}=config;const [form,setForm]=useState(()=>{if(type==='capture')return record?{...record}:{kind:'thought',text:'',context:'Personal',projectId:'',sourceUrl:''};if(type==='task')return record?{...record}:{title:config.capture?.text||'',notes:'',projectId:config.capture?.projectId||'',context:config.capture?.context||config.context||'Work',priority:'Medium',deadline:'',scheduledDay:config.scheduledDay||'',estimateMinutes:'',recurrence:'none',sourceUrl:config.capture?.sourceUrl||'',done:false};if(type==='project')return record?{...record,milestones:record.milestones||[]}:{name:'',status:'Planning',deadline:'',nextAction:'',checkpoint:'',blocker:'',resourceUrl:'',milestones:[]};if(type==='event')return record?{...record}:{title:'',day:config.day||todayKey(),start:'09:00',end:'10:00',sourceUrl:''};if(type==='alert')return record?{...record}:{title:'',reason:'',source:'Manual',sourceUrl:'',priority:'Medium'};return{repository:''}});
+ const [validation,setValidation]=useState(''),[milestone,setMilestone]=useState('');const set=(name,value)=>setForm(f=>({...f,[name]:value}));
+ const input=(name,kind='text',required=false)=><input type={kind} required={required} value={form[name]??''} onChange={e=>set(name,e.target.value)}/>;
+ const area=name=><textarea rows={3} value={form[name]||''} onChange={e=>set(name,e.target.value)}/>;
+ const select=(name,options)=><select value={form[name]||''} onChange={e=>set(name,e.target.value)}>{options.map(x=><option key={x} value={x}>{x}</option>)}</select>;
+ async function submit(e){e.preventDefault();setValidation('');const sourceName=type==='project'?'resourceUrl':'sourceUrl';if(form[sourceName]&&!safeUrl(form[sourceName])){setValidation('Use a complete http:// or https:// link.');return}if(type==='event'&&form.end<=form.start){setValidation('End time must be after start time.');return}if(type==='task'&&form.recurrence!=='none'&&!form.deadline){setValidation('Choose a deadline for a recurring obligation.');return}if(type==='connection'&&!/^[\w.-]+\/[\w.-]+$/.test(form.repository.trim())){setValidation('Enter a public repository as owner/repository.');return}
+ if(type==='capture'){if(!form.text.trim())return;const ok=record?await save(d=>Object.assign(d.captures.find(x=>x.id===record.id),form,{text:form.text.trim(),projectId:form.projectId||null,updatedAt:stamp()}),'Capture updated.'):await capture(form.text,{...form,text:form.text.trim(),projectId:form.projectId||null});if(ok)onClose();return}
+ const collection={task:'tasks',project:'projects',event:'events',alert:'alerts',connection:'connections'}[type];const entry={...form,id:record?.id||uid(),updatedAt:stamp()};if(type==='task'){entry.title=entry.title.trim();entry.deadline=entry.deadline||null;entry.scheduledDay=entry.scheduledDay||null;entry.projectId=entry.projectId||null;entry.estimateMinutes=entry.estimateMinutes?Number(entry.estimateMinutes):null;if(!entry.title)return}if(type==='project'){entry.name=entry.name.trim();entry.deadline=entry.deadline||null;if(!entry.name)return}if(type==='event'||type==='alert'){entry.title=entry.title.trim();if(!entry.title)return}if(!record)Object.assign(entry,{createdAt:stamp(),...(type==='alert'?{dismissed:false,snoozedUntil:null,connectionId:null}:{}),...(type==='connection'?{provider:'github',repository:entry.repository.trim(),status:'idle',lastSuccessAt:null,error:''}:{})});
+ if(type==='connection'&&data.connections.some(c=>c.repository.toLowerCase()===entry.repository.toLowerCase())){setValidation('This repository is already connected.');return}
+ const ok=await save(d=>{if(record)Object.assign(d[collection].find(x=>x.id===record.id),entry);else d[collection].unshift(entry);if(config.capture){const c=d.captures.find(x=>x.id===config.capture.id);c.convertedTaskId=entry.id;c.updatedAt=stamp()}},type==='task'&&config.capture?'Task created. Original thought kept in Inbox.':'Saved on this device.');if(ok){onClose();if(type==='connection')afterConnection(entry)}
+ }
+ return <Dialog title={type==='capture'?(record?'Edit capture':'Save what’s on your mind.'):type==='task'?(record?'Edit task':config.capture?'Turn thought into a task':'Add a task'):type==='project'?(record?record.name:'Add a project'):type==='event'?'Calendar commitment':type==='alert'?'Attention item':'Connect a public repository'} onClose={onClose}><form onSubmit={submit} className="editor-form">
+ {type==='capture'&&<><div className="type-chips wide">{['thought','task','link','reminder'].map(x=><button className={form.kind===x?'selected':''} type="button" key={x} onClick={()=>set('kind',x)}>{x}</button>)}</div><Field label={form.kind==='thought'?'Thought':'Capture'} wide><textarea required rows={5} placeholder="Let the thought land here…" value={form.text} onChange={e=>set('text',e.target.value)}/></Field><details className="wide"><summary>Optional details</summary><div className="form-grid"><Field label="Context">{select('context',['Personal','Work','Study'])}</Field><Field label="Project"><select value={form.projectId||''} onChange={e=>set('projectId',e.target.value)}><option value="">No project</option>{data.projects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select></Field><Field label="Source link" wide>{input('sourceUrl','url')}</Field></div></details><p className="fine-print wide">Saved to Inbox for later. Tasks and reminders can be converted when you’re ready.</p></>}
+ {type==='task'&&<><Field label="Task title" wide>{input('title','text',true)}</Field><Field label="Notes" wide>{area('notes')}</Field><Field label="Context">{select('context',['Work','Personal','Study'])}</Field><Field label="Project"><select value={form.projectId||''} onChange={e=>set('projectId',e.target.value)}><option value="">No project</option>{data.projects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select></Field><Field label="Priority">{select('priority',['Low','Medium','High'])}</Field><Field label="Deadline (due by)">{input('deadline','date')}</Field><Field label="Scheduled day (work on)">{input('scheduledDay','date')}</Field><Field label="Estimate in minutes"><input type="number" min="1" max="1440" value={form.estimateMinutes??''} onChange={e=>set('estimateMinutes',e.target.value)}/></Field><Field label="Repeat">{select('recurrence',['none','daily','weekly','monthly','yearly'])}</Field><Field label="Source link">{input('sourceUrl','url')}</Field><p className="fine-print wide">Assigning a day plans your duration; it does not create a synced calendar block.</p></>}
+ {type==='project'&&<><Field label="Project name" wide>{input('name','text',true)}</Field><Field label="Status">{select('status',['Planning','Building','Polishing','Paused','Complete'])}</Field><Field label="Deadline">{input('deadline','date')}</Field><Field label="Next action" wide>{input('nextAction')}</Field><Field label="Blocker" wide>{input('blocker')}</Field><Field label="Checkpoint — where to resume" wide>{area('checkpoint')}</Field><Field label="Resource link" wide>{input('resourceUrl','url')}</Field><div className="wide milestones"><span className="eyebrow">MILESTONES / {form.milestones.filter(m=>m.done).length} OF {form.milestones.length}</span>{form.milestones.map(m=><div key={m.id}><label><input type="checkbox" checked={m.done} onChange={()=>set('milestones',form.milestones.map(x=>x.id===m.id?{...x,done:!x.done}:x))}/>{m.title}</label><button type="button" className="icon-button" aria-label={`Delete milestone ${m.title}`} onClick={()=>set('milestones',form.milestones.filter(x=>x.id!==m.id))}><X size={15}/></button></div>)}<div><input aria-label="New milestone" placeholder="Add a milestone" value={milestone} onChange={e=>setMilestone(e.target.value)}/><button type="button" className="quiet" disabled={!milestone.trim()} onClick={()=>{set('milestones',[...form.milestones,{id:uid(),title:milestone.trim(),done:false}]);setMilestone('')}}><Plus size={15}/>Add</button></div></div><Link url={form.resourceUrl} children="Open project resource"/></>}
+ {type==='event'&&<><Field label="Commitment title" wide>{input('title','text',true)}</Field><Field label="Day">{input('day','date',true)}</Field><Field label="Source link">{input('sourceUrl','url')}</Field><Field label="Start">{input('start','time',true)}</Field><Field label="End">{input('end','time',true)}</Field><p className="fine-print wide">A manual commitment in your local calendar. External calendar syncing is not connected.</p></>}
+ {type==='alert'&&<><Field label="Title" wide>{input('title','text',true)}</Field><Field label="Why it needs attention" wide>{area('reason')}</Field><Field label="Priority">{select('priority',['Low','Medium','High'])}</Field><Field label="Source link">{input('sourceUrl','url')}</Field><Link url={form.sourceUrl}/></>}
+ {type==='connection'&&<><Field label="Public GitHub repository" wide>{input('repository','text',true)}</Field><p className="fine-print wide">Use owner/repository. Latest 50 issue/PR updates. No tokens or account permissions required.</p></>}
+ {validation&&<p className="danger wide" role="alert">{validation}</p>}<div className="form-actions wide">{record&&<button type="button" className="quiet danger" disabled={saving} onClick={()=>remove({capture:'captures',task:'tasks',project:'projects',event:'events',alert:'alerts'}[type],record.id)}><Trash2 size={15}/>Delete</button>}<button type="button" className="quiet" onClick={onClose}>Cancel</button><button className="primary" disabled={saving}>{saving?'Saving…':type==='capture'?'Save to Inbox':type==='connection'?'Connect & refresh':'Save'}<ArrowRight size={15}/></button></div>
+ </form></Dialog>
 }
-
-function MovableWidget({ id, box, severity, eyebrow, title, icon, children, onMove, onExpand, compact = false }) {
-  const drag = React.useRef(null);
-  function pointerDown(event) {
-    if (event.target.closest('button')) return;
-    const canvas = event.currentTarget.closest('.open-plan');
-    if (!canvas) return;
-    event.currentTarget.setPointerCapture(event.pointerId);
-    drag.current = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, x: box.x, y: box.y, rect: canvas.getBoundingClientRect() };
-  }
-  function pointerMove(event) {
-    if (!drag.current) return;
-    const nextX = Math.min(100 - box.w, Math.max(0, drag.current.x + (event.clientX - drag.current.startX) / drag.current.rect.width * 100));
-    const nextY = Math.min(100 - box.h, Math.max(0, drag.current.y + (event.clientY - drag.current.startY) / drag.current.rect.height * 100));
-    onMove(id, { x: Number(nextX.toFixed(2)), y: Number(nextY.toFixed(2)) });
-  }
-  function pointerUp(event) { if (drag.current) event.currentTarget.releasePointerCapture?.(drag.current.pointerId); drag.current = null; }
-  return <article className={`floating-widget severity-${severity} ${compact ? 'compact' : ''}`} style={{ left: `${box.x}%`, top: `${box.y}%`, width: `${box.w}%`, height: `${box.h}%` }}>
-    <header className="floating-head" onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerUp} onPointerCancel={pointerUp}><div className="drag-mark"><GripHorizontal size={13} /></div><div className="floating-title"><span>{eyebrow}</span><h2>{title}</h2></div><div className="floating-actions">{icon}<button onClick={() => onExpand(id)} aria-label={`Expand ${title}`}><Maximize2 size={13} /></button></div></header>
-    <div className="floating-body">{children}</div>
-  </article>;
-}
-
-function ExpandedWidget({ id, projects, tasks, system, nextDeadline, avgProgress, dailyBriefing, onClose, onToggleTask, onBumpProject }) {
-  const names = { projects: 'Projects', tasks: 'Tasks & deadlines', briefing: 'VK briefing', signals: 'Market signals', schedule: 'Schedule' };
-  const openTasks = tasks.filter((task) => !task.done); const completed = tasks.length - openTasks.length;
-  return <div className="expanded-backdrop"><section className="expanded-panel"><header><div><span>{id === 'briefing' && dailyBriefing ? 'DAILY BRIEFING / 06:00 CYCLE' : 'VK / FOCUSED WORKSPACE'}</span><h2>{names[id]}</h2></div><div className="expanded-header-meta"><span>{id === 'briefing' && dailyBriefing ? 'Prepared for your first open' : 'Everything else is quiet'}</span><button onClick={onClose} aria-label="Close expanded dashboard"><X size={18} /></button></div></header>
-    <div className="expanded-content expanded-dashboard">
-      {id === 'projects' && <><section className="expanded-hero"><div><span>PORTFOLIO VIEW</span><h3>{projects.length} projects moving at {avgProgress}% average progress.</h3></div><div className="hero-metrics"><div><strong>{projects.length}</strong><small>active</small></div><div><strong>{projects.filter((item) => item.progress >= 80).length}</strong><small>near finish</small></div><div><strong>{avgProgress}%</strong><small>momentum</small></div></div></section><div className="project-dashboard-grid">{projects.map((project) => <article className="project-dashboard-card" key={project.id}><header><span>{project.status}</span><b>{project.progress}%</b></header><h3>{project.name}</h3><p>Deadline · {project.deadline}</p><div className="expanded-progress"><i style={{ width: `${project.progress}%` }} /></div><button onClick={() => onBumpProject(project.id)}>Advance progress <ArrowRight size={14} /></button></article>)}</div></>}
-      {id === 'tasks' && <><section className="expanded-hero"><div><span>EXECUTION VIEW</span><h3>{openTasks.length} open tasks, ordered by urgency.</h3></div><div className="hero-metrics"><div><strong>{openTasks.length}</strong><small>open</small></div><div><strong>{openTasks.filter((task) => task.priority === 'High').length}</strong><small>high priority</small></div><div><strong>{completed}</strong><small>completed</small></div></div></section><div className="task-dashboard"><div className="task-dashboard-head"><span>TASK</span><span>PROJECT</span><span>DUE</span><span>PRIORITY</span></div>{tasks.map((task) => <button className={`task-dashboard-row ${task.done ? 'done' : ''}`} key={task.id} onClick={() => onToggleTask(task.id)}><span className="checkmark">{task.done && <Check size={11} />}</span><strong>{task.title}</strong><span>{task.project}</span><time>{formatDue(task.due)}</time><em className={`p-${task.priority.toLowerCase()}`}>{task.priority}</em></button>)}</div></>}
-      {id === 'briefing' && <div className="brief-dashboard"><section className="brief-focus"><div className={`brief-orb state-${system.level}`}><Sparkles size={22} /></div><span>VK / CURRENT READ</span><h3>{system.message}</h3><p>{system.level === 'critical' ? 'Urgent work is competing for the same window. Close or reschedule the nearest deadline before opening another lane.' : 'Your plan is balanced. Keep moving the highest-priority project.'}</p></section><aside className="brief-queue"><span>ATTENTION QUEUE</span>{openTasks.slice(0, 4).map((task, index) => <button key={task.id} onClick={() => onToggleTask(task.id)}><b>0{index + 1}</b><div><strong>{task.title}</strong><small>{task.project} · {formatDue(task.due)}</small></div><ChevronRight size={14} /></button>)}</aside><div className="expanded-metrics"><div><strong>{openTasks.length}</strong><span>open tasks</span></div><div><strong>{avgProgress}%</strong><span>project progress</span></div><div><strong>{nextDeadline ? formatDue(nextDeadline.due) : 'Clear'}</strong><span>nearest deadline</span></div></div></div>}
-      {id === 'signals' && <><section className="expanded-hero"><div><span>MARKET WATCH</span><h3>BTC and XAUUSD, ready for a live source.</h3></div></section><div className="signal-dashboard"><div className="signal-placeholder"><Bitcoin size={24} /><span>BTC / USD</span><strong>—</strong><small>Awaiting price feed</small></div><div className="signal-placeholder"><CircleDollarSign size={24} /><span>XAU / USD</span><strong>—</strong><small>Awaiting price feed</small></div><EmptyConnection icon={<Radio size={22} />} title="Connect market data" copy="The interface is ready. Add a provider to activate charts, movement and alerts." /></div></>}
-      {id === 'schedule' && <><section className="expanded-hero"><div><span>TIME VIEW</span><h3>Today and the nearest commitments.</h3></div><div className="hero-metrics"><div><strong>1</strong><small>event today</small></div><div><strong>{openTasks.length}</strong><small>task deadlines</small></div></div></section><div className="schedule-dashboard"><div className="schedule-day"><span>TODAY</span><strong>24</strong><small>September</small></div><div className="schedule-timeline"><div><time>10:30</time><i /><section><strong>Architecture review</strong><span>VK Command Centre · Focus block</span></section></div>{nextDeadline && <div><time>{formatDue(nextDeadline.due)}</time><i /><section><strong>{nextDeadline.title}</strong><span>{nextDeadline.project} · {nextDeadline.priority} priority</span></section></div>}</div></div></>}
-    </div>
-  </section></div>;
-}
-
-function EmptyConnection({ icon, title, copy }) { return <div className="empty-connection">{icon}<h3>{title}</h3><p>{copy}</p><button>Connect source</button></div>; }
-
-function Panel({ id, eyebrow, title, icon, children, onFocus, compact = false }) {
-  return <article id={id} className={`data-panel ${compact ? 'compact' : ''}`} onClick={onFocus}><div className="panel-heading"><div><span>{eyebrow}</span><h2>{title}</h2></div>{icon}</div>{children}</article>;
-}
-
-function PinGate({ pinHash, setPinHash, onUnlock }) {
-  const [value, setValue] = useState(''); const [error, setError] = useState(false);
-  async function digest(pin) { const bytes = new TextEncoder().encode(pin); const hash = await crypto.subtle.digest('SHA-256', bytes); return Array.from(new Uint8Array(hash)).map((byte) => byte.toString(16).padStart(2, '0')).join(''); }
-  async function submit(event) { event.preventDefault(); if (value.length < 4) return; const next = await digest(value); if (!pinHash) { localStorage.setItem('vk-pin-hash', next); setPinHash(next); onUnlock(); return; } if (next === pinHash) onUnlock(); else { setError(true); setValue(''); } }
-  return <main className="pin-gate"><form onSubmit={submit}><div className="pin-logo">VK</div><label htmlFor="pin">{pinHash ? 'Enter PIN' : 'Create PIN'}</label><input id="pin" autoFocus type="password" inputMode="numeric" autoComplete="current-password" maxLength="6" value={value} onChange={(event) => { setError(false); setValue(event.target.value.replace(/\D/g, '')); }} placeholder="••••••" aria-invalid={error} /><button disabled={value.length < 4}>Enter <ArrowRight size={16} /></button>{error && <small>Wrong PIN</small>}</form></main>;
-}
-
-function QuickCapture({ projects, onClose, onAdd }) {
-  const [title, setTitle] = useState(''); const [project, setProject] = useState(projects[0]?.name || 'Personal'); const [priority, setPriority] = useState('Medium'); const [due, setDue] = useState(shiftDate(0));
-  return <div className="modal-backdrop" onClick={onClose}><form className="capture-modal" onSubmit={(event) => { event.preventDefault(); if (title.trim()) onAdd({ title: title.trim(), project, priority, due }); }} onClick={(event) => event.stopPropagation()}><div className="modal-head"><div><span>QUICK CAPTURE</span><h2>Add something real.</h2></div><button type="button" onClick={onClose}><X size={17} /></button></div><input className="capture-title" autoFocus placeholder="What needs to happen?" value={title} onChange={(event) => setTitle(event.target.value)} /><div className="capture-fields"><label>Project<select value={project} onChange={(event) => setProject(event.target.value)}>{projects.map((item) => <option key={item.id}>{item.name}</option>)}</select></label><label>Priority<select value={priority} onChange={(event) => setPriority(event.target.value)}><option>Low</option><option>Medium</option><option>High</option></select></label><label>Due<input type="date" value={due} onChange={(event) => setDue(event.target.value)} /></label></div><button className="save-task">Add task <ArrowRight size={15} /></button></form></div>;
-}
-
-function CommandMenu({ current, onClose, onSelect }) {
-  const items = ['Briefing', 'Projects', 'Tasks', 'Schedule', 'Signals']; const selected = Math.max(0, items.findIndex((item) => item.toLowerCase() === current));
-  return <div className="wheel-backdrop" onClick={onClose}><section className="wheel-menu" onClick={(event) => event.stopPropagation()}><div className="wheel-head"><div><span>VK / NAVIGATION</span><h2>Choose a system.</h2></div><button onClick={onClose}><X size={18} /></button></div><div className="wheel-wrap"><OptionWheel items={items} defaultSelected={selected} side="right" fontSize={2.3} spacing={1.55} tilt={7} curve={1.1} blur={.18} fade={.14} minOpacity={.28} inset={60} textColor="#68686e" activeColor="#121216" onSelect={(_, item) => onSelect(item)} /></div><footer><span><Command size={12} /> Scroll or drag · Enter to open</span></footer></section></div>;
-}
-
-function formatDue(value) { const diff = Math.ceil((new Date(`${value}T23:59:59`) - new Date()) / DAY); if (diff < 0) return `${Math.abs(diff)}d late`; if (diff === 0) return 'Today'; if (diff === 1) return 'Tomorrow'; return `${diff} days`; }
-
-class ErrorBoundary extends React.Component {
-  constructor(props) { super(props); this.state = { error: null }; }
-  static getDerivedStateFromError(error) { return { error }; }
-  render() { return this.state.error ? <pre style={{ padding: 24, whiteSpace: 'pre-wrap' }}>{this.state.error.stack || this.state.error.message}</pre> : this.props.children; }
-}
-
-createRoot(document.getElementById('root')).render(<ErrorBoundary><App /></ErrorBoundary>);
-
-if ('serviceWorker' in navigator && import.meta.env.PROD) window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js'));
+function Settings({data,save,ws,saving}){const [settings,setSettings]=useState(data.settings),[importError,setImportError]=useState('');return <div className="settings"><section><h2>Your working day</h2><form className="editor-form" onSubmit={async e=>{e.preventDefault();if(settings.dayEnd<=settings.dayStart){setImportError('Working day must end after it starts.');return}if(await save(d=>{d.settings={...settings,bufferMinutes:Number(settings.bufferMinutes)}},'Planning preferences saved.'))setImportError('')}}><Field label="Start"><input required type="time" value={settings.dayStart} onChange={e=>setSettings({...settings,dayStart:e.target.value})}/></Field><Field label="End"><input required type="time" value={settings.dayEnd} onChange={e=>setSettings({...settings,dayEnd:e.target.value})}/></Field><Field label="Meeting buffer in minutes"><input required min="0" max="120" type="number" value={settings.bufferMinutes} onChange={e=>setSettings({...settings,bufferMinutes:e.target.value})}/></Field><div className="form-actions wide"><button className="primary" disabled={saving}>Save preferences</button></div></form></section><section><h2>Keep a copy</h2><p>Your thoughts, projects, tasks, and commitments are stored on this device. Export a backup to carry them elsewhere.</p><button className="quiet" onClick={ws.exportData}>Export backup<ArrowRight size={15}/></button><label className="restore-label">Restore a backup<input type="file" accept="application/json,.json" onChange={async e=>{const file=e.target.files[0];if(!file)return;try{const text=await file.text();if(!window.confirm('Replace this device’s current workspace with the backup? Export your current data first if you need to keep it.'))return;const ok=await ws.importData(text);setImportError(ok?'':'The backup could not be restored.')}catch{setImportError('Could not read this backup.')}e.target.value=''}}/></label><p className="fine-print">PIN is a local privacy gate. It is not server authentication or encrypted storage.</p></section>{importError&&<p className="danger" role="alert">{importError}</p>}</div>}
+function PinGate({pinHash,setPinHash,onUnlock}){const [value,setValue]=useState(''),[error,setError]=useState('');async function submit(e){e.preventDefault();try{const bytes=new TextEncoder().encode(value),digest=await crypto.subtle.digest('SHA-256',bytes),next=Array.from(new Uint8Array(digest)).map(x=>x.toString(16).padStart(2,'0')).join('');if(!pinHash){localStorage.setItem('vk-pin-hash',next);setPinHash(next);onUnlock()}else if(next===pinHash)onUnlock();else{setError('Wrong PIN. Try again.');setValue('')}}catch{setError('PIN storage is unavailable on this device.')}}return <main className="pin-gate"><form onSubmit={submit}><strong className="pin-logo">VK</strong><label htmlFor="pin">{pinHash?'Enter PIN':'Create your PIN'}</label><input id="pin" autoFocus required type="password" inputMode="numeric" autoComplete={pinHash?'current-password':'new-password'} maxLength={6} value={value} onChange={e=>{setValue(e.target.value.replace(/\D/g,''));setError('')}} placeholder="••••••"/><button className="primary" disabled={value.length<4}>Enter<ArrowRight size={16}/></button><small>A local privacy gate for this device.</small>{error&&<p className="danger" role="alert">{error}</p>}</form></main>}
+class ErrorBoundary extends React.Component{constructor(p){super(p);this.state={error:null}}static getDerivedStateFromError(error){return{error}}render(){return this.state.error?<main className="loading"><h1>VK could not open.</h1><p>{this.state.error.message}</p><button onClick={()=>location.reload()}>Reload</button></main>:this.props.children}}
+createRoot(document.getElementById('root')).render(<ErrorBoundary><App/></ErrorBoundary>);
+if('serviceWorker'in navigator&&import.meta.env.PROD)window.addEventListener('load',()=>navigator.serviceWorker.register('/sw.js'));

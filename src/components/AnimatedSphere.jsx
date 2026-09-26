@@ -12,7 +12,7 @@ export default function AnimatedSphere({ className = '', particleColor = '18, 18
   useEffect(() => {
     const canvas = canvasRef.current; const ctx = canvas?.getContext('2d');
     if (!canvas || !ctx) return undefined;
-    let width = 0; let height = 0; let active = true;
+    let width = 0; let height = 0; let active = true; let visible = true;
     const reduced = window.matchMedia('(prefers-reduced-motion: reduce)');
     const updateSize = () => { const rect = canvas.getBoundingClientRect(); const dpr = Math.min(window.devicePixelRatio || 1, MAX_DPR); width = rect.width; height = rect.height; canvas.width = Math.max(1, Math.floor(width * dpr)); canvas.height = Math.max(1, Math.floor(height * dpr)); ctx.setTransform(dpr, 0, 0, dpr, 0, 0); };
     const drawFrame = () => {
@@ -31,9 +31,12 @@ export default function AnimatedSphere({ className = '', particleColor = '18, 18
     };
     const observer = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(() => { updateSize(); drawFrame(); }) : null;
     observer?.observe(canvas); window.addEventListener('resize', updateSize); updateSize(); drawFrame();
-    const loop = () => { drawFrame(); if (active && !reduced.matches) frameRef.current = requestAnimationFrame(loop); };
-    frameRef.current = requestAnimationFrame(loop);
-    return () => { active = false; observer?.disconnect(); window.removeEventListener('resize', updateSize); cancelAnimationFrame(frameRef.current); };
+    const animate = () => active && visible && !document.hidden && !reduced.matches;
+    const loop = () => { frameRef.current = 0; if (!animate()) return; drawFrame(); frameRef.current = requestAnimationFrame(loop); };
+    const resume = () => { cancelAnimationFrame(frameRef.current); frameRef.current = 0; if (animate()) frameRef.current = requestAnimationFrame(loop); else drawFrame(); };
+    const intersection = typeof IntersectionObserver !== 'undefined' ? new IntersectionObserver(([entry]) => { visible = entry.isIntersecting; resume(); }) : null;
+    intersection?.observe(canvas); document.addEventListener('visibilitychange', resume); reduced.addEventListener('change', resume); resume();
+    return () => { active = false; observer?.disconnect(); intersection?.disconnect(); window.removeEventListener('resize', updateSize); document.removeEventListener('visibilitychange', resume); reduced.removeEventListener('change', resume); cancelAnimationFrame(frameRef.current); };
   }, [particleColor, intensity]);
 
   function move(event) { if (!interactive) return; const rect = event.currentTarget.getBoundingClientRect(); pointerRef.current.targetX = ((event.clientX - rect.left) / rect.width - .5) * 2; pointerRef.current.targetY = ((event.clientY - rect.top) / rect.height - .5) * 2; pointerRef.current.inside = true; }

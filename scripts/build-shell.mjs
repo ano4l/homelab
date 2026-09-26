@@ -1,0 +1,12 @@
+import { readFile, writeFile, readdir } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+const html = await readFile('dist/index.html', 'utf8');
+const assets = (await readdir('dist/assets')).map((name) => `/assets/${name}`);
+const shell = ['/index.html', '/manifest.webmanifest', '/icons/vk-app-icon.svg', '/icons/vk-app-icon-192.png', '/icons/vk-app-icon-512.png', ...assets];
+const template = await readFile('public/sw.js', 'utf8');
+const contents = await Promise.all(shell.map((path) => readFile(`dist${path}`)));
+const hash = createHash('sha256').update(html).update(template);
+contents.forEach((bytes) => hash.update(bytes));
+const version = hash.digest('hex').slice(0, 12);
+await writeFile('dist/sw.js', template.replace('__VK_BUILD__', version).replace('/* __VK_ASSETS__ */ []', JSON.stringify(shell)));
+console.log(`Offline shell prepared: ${shell.length} assets, build ${version}.`);
