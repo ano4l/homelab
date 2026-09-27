@@ -1,4 +1,4 @@
-export const VERSION = 1;
+export const VERSION = 2;
 export const uid = () => globalThis.crypto?.randomUUID?.() || `vk-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 export const todayKey = (date = new Date()) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 const parseDay = (key) => new Date(`${key}T12:00:00`);
@@ -18,7 +18,18 @@ export function formatDue(key, date = new Date()) {
 export function safeUrl(value) {
   try { const url = new URL(value); return ['http:', 'https:'].includes(url.protocol) ? url.href : ''; } catch { return ''; }
 }
-export const emptyWorkspace = () => ({ version: VERSION, tasks: [], captures: [], projects: [], events: [], alerts: [], connections: [], settings: { dayStart: '09:00', dayEnd: '17:00', bufferMinutes: 15 }, updatedAt: new Date().toISOString() });
+export const emptyWorkspace = () => ({ version: VERSION, tasks: [], captures: [], projects: [], events: [], alerts: [], connections: [], background: [], directions: [], debtors: [], settings: { dayStart: '09:00', dayEnd: '17:00', bufferMinutes: 15 }, updatedAt: new Date().toISOString() });
+
+export function upgradeWorkspace(value) {
+  const doc = structuredClone(value);
+  if (doc?.version === 1) Object.assign(doc, { version: VERSION, background: [], directions: [], debtors: [] });
+  return validateWorkspace(doc);
+}
+
+export function debtorTotals(debtors) {
+  const outstanding = debtors.filter(item => item.status !== 'Paid' && item.status !== 'Cancelled');
+  return { knownCents: outstanding.reduce((sum, item) => sum + (item.amountCents === null ? 0 : Math.max(0, item.amountCents - (item.paidCents || 0))), 0), unknownCount: outstanding.filter(item => item.amountCents === null).length, count: outstanding.length };
+}
 
 function fail(message) { throw new Error(`Invalid backup: ${message}`); }
 const clockValid = (value) => typeof value === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
@@ -26,7 +37,7 @@ const minutes = (value) => Number(value.slice(0, 2)) * 60 + Number(value.slice(3
 const clock = (value) => `${String(Math.floor(value / 60)).padStart(2, '0')}:${String(value % 60).padStart(2, '0')}`;
 export function validateWorkspace(value) {
   if (!value || value.version !== VERSION) fail('unsupported version.');
-  const groups = ['tasks', 'captures', 'projects', 'events', 'alerts', 'connections'];
+  const groups = ['tasks', 'captures', 'projects', 'events', 'alerts', 'connections', 'background', 'directions', 'debtors'];
   for (const group of groups) {
     if (!Array.isArray(value[group]) || value[group].length > 10000) fail(`${group} must be a list of at most 10,000 records.`);
     const ids = new Set();
@@ -34,7 +45,7 @@ export function validateWorkspace(value) {
       if (!item || typeof item !== 'object' || typeof item.id !== 'string' || !item.id || ids.has(item.id)) fail(`${group} has a missing or duplicate ID.`);
       ids.add(item.id);
       for (const field of ['notes', 'context', 'priority', 'status', 'nextAction', 'blocker', 'checkpoint', 'reason', 'source']) if (item[field] != null && typeof item[field] !== 'string') fail(`${group} has invalid ${field}.`);
-      const text = item[group === 'captures' ? 'text' : group === 'projects' ? 'name' : group === 'connections' ? 'repository' : 'title'];
+      const text = item[group === 'captures' ? 'text' : ['projects','debtors'].includes(group) ? 'name' : group === 'connections' ? 'repository' : 'title'];
       if (typeof text !== 'string' || !text.trim() || text.length > 50000) fail(`${group} contains an empty or oversized record.`);
       for (const field of ['deadline', 'scheduledDay']) if (item[field] && !validDay(item[field])) fail(`${group} has an invalid date.`);
       if (group === 'tasks') {
@@ -46,6 +57,13 @@ export function validateWorkspace(value) {
       if (group === 'projects' && (!Array.isArray(item.milestones) || item.milestones.some((m) => !m || typeof m.id !== 'string' || typeof m.title !== 'string' || !m.title.trim()))) fail('project milestones are invalid.');
       if (group === 'events' && (!validDay(item.day) || !clockValid(item.start) || !clockValid(item.end) || item.end <= item.start)) fail('commitment needs a valid day and an end after its start.');
       if (group === 'connections' && (item.provider !== 'github' || !validRepository(item.repository))) fail('GitHub repository must use owner/repo.');
+      if (group === 'debtors') {
+        if (item.amountCents !== null && (!Number.isSafeInteger(item.amountCents) || item.amountCents < 0 || item.amountCents > 100000000000)) fail('debt amount must be unknown or a positive amount in cents.');
+        if (!Number.isSafeInteger(item.paidCents) || item.paidCents < 0 || (item.amountCents === null ? item.paidCents !== 0 : item.paidCents > item.amountCents)) fail('received amount must not exceed the known debt.');
+        if (!['Outstanding','Part paid','Paid','Cancelled'].includes(item.status)) fail('unknown debtor status.');
+        if (item.status === 'Paid' && (item.amountCents === null || item.paidCents !== item.amountCents)) fail('paid debt must have a known, fully received amount.');
+        if (item.currency !== 'ZAR') fail('debtor currency must be ZAR.');
+      }
       for (const field of ['sourceUrl', 'resourceUrl']) if (item[field] && !safeUrl(item[field])) fail('links must use http or https.');
     }
   }

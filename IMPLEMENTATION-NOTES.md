@@ -27,3 +27,9 @@ The PIN is a local privacy gate, not encrypted storage or server authentication.
 - `git diff --check`: passes. Screenshots: `vk-implemented-desktop.png`, `vk-implemented-mobile.png`.
 
 Implementation remains local; no deployment was performed. Independent browser QA was completed, but an evaluator from a different model provider was unavailable in this environment.
+
+## Mobile navigation refinement
+
+Phones and touch-primary devices use native momentum scrolling with centered snap targets, 64px rows, a selection band, and an explicit Open button. Swiping updates selection without navigating; tapping a visible space opens it directly. Per-label animation and blur are skipped in this mode. Desktop retains the curved wheel. The picker adapts to short screens, supports arrow keys/Home/End/Enter, and exposes its active option to assistive technology.
+
+Browser verification covered snap selection without background page movement, first/last items, opening the highlighted space, keyboard selection, mobile-to-desktop resizing, and a 320×568 screen with no inner dialog overflow. Also checked 390×844, 768×1024, and 1440×900. Build and diff checks pass. This is browser verification; physical-device touch feel was not tested.

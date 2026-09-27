@@ -3,3 +3,35 @@
 .option-wheel__item { position:absolute; top:50%; left:var(--ow-inset); white-space:nowrap; font-size:var(--ow-font-size); line-height:1; font-weight:400; letter-spacing:-.055em; transform-origin:left center; cursor:pointer; will-change:transform,opacity,filter; color:color-mix(in srgb,var(--ow-active-color) calc(var(--ow-p,0) * 100%),var(--ow-text-color)); transition:color .2s ease; }
 .option-wheel--right .option-wheel__item { left:auto; right:var(--ow-inset); transform-origin:right center; }
 .option-wheel__item--selected { font-weight:700; }
+.option-wheel-shell { position:relative; height:100%; }
+.option-wheel-shell--native { display:flex; flex-direction:column; gap:12px; }
+.wheel-wrap:has(.option-wheel-shell--native) { height:clamp(220px, 44dvh, 360px); }
+.option-wheel--native {
+  flex:1; min-height:0; height:auto; overflow-y:auto; overflow-x:hidden;
+  padding-block:var(--ow-padding, 122px); touch-action:pan-y;
+  overscroll-behavior-y:contain; scroll-snap-type:y mandatory;
+  scrollbar-width:none; cursor:auto; -webkit-overflow-scrolling:touch;
+  mask-image:linear-gradient(transparent, black 22%, black 78%, transparent);
+}
+.option-wheel--native::-webkit-scrollbar { display:none; }
+.option-wheel--native .option-wheel__item {
+  position:relative; inset:auto; height:64px; width:100%; padding:0 16px;
+  display:flex; align-items:center; justify-content:center;
+  scroll-snap-align:center; scroll-snap-stop:normal;
+  font-size:24px; line-height:1.2; letter-spacing:-.04em;
+  color:var(--ow-text-color); filter:none; will-change:auto;
+  transition:color .12s ease; transform:none;
+}
+.option-wheel--native .option-wheel__item--selected { color:var(--ow-active-color); }
+.option-wheel__selection-band {
+  pointer-events:none; position:absolute; top:calc((100% - 64px) / 2 - 32px);
+  inset-inline:8px; height:64px; border-block:1px solid #e5e5e5;
+  border-radius:4px; background:#f7f7f4;
+}
+.option-wheel__open {
+  flex-shrink:0; width:100%; min-height:52px; border:0; border-radius:4px;
+  background:#161619; color:white; padding:12px 20px;
+  display:flex; align-items:center; justify-content:space-between;
+  font-size:14px; font-weight:700;
+}
+@media(prefers-reduced-motion:reduce) { .option-wheel__item { transition:none; } }
