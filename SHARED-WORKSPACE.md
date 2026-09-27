@@ -26,6 +26,8 @@ The configured project is `cldqytpnxjdzyerwsmnn`. The CLI login available during
 
 Do not share the setup link or deploy it as a public asset. Its random secret prevents a stranger from claiming the workspace before the intended owner. Registration stays closed even if someone tries to reuse the link.
 
+The production home page shows the owner-signup form whenever registration is open. Opening the private setup link supplies the setup key automatically; visiting the home page directly offers a setup-key field. After account creation, the same home page becomes sign-in only. A private production setup link is saved locally in `.private/production-setup-link.txt`.
+
 ## Private import preparation
 
 ```powershell
