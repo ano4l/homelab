@@ -33,3 +33,9 @@ Implementation remains local; no deployment was performed. Independent browser Q
 Phones and touch-primary devices use native momentum scrolling with centered snap targets, 64px rows, a selection band, and an explicit Open button. Swiping updates selection without navigating; tapping a visible space opens it directly. Per-label animation and blur are skipped in this mode. Desktop retains the curved wheel. The picker adapts to short screens, supports arrow keys/Home/End/Enter, and exposes its active option to assistive technology.
 
 Browser verification covered snap selection without background page movement, first/last items, opening the highlighted space, keyboard selection, mobile-to-desktop resizing, and a 320×568 screen with no inner dialog overflow. Also checked 390×844, 768×1024, and 1440×900. Build and diff checks pass. This is browser verification; physical-device touch feel was not tested.
+
+
+## Live dashboard report
+The authenticated owner can request GET /api/daily-report. Supabase user verification and an RLS workspace read run before any provider request. Provider keys stay in server environment variables. Vite exposes only VITE-prefixed public settings; its development middleware uses the same handler.
+The server gathers CoinGecko crypto, Twelve Data gold and USD/ZAR, GNews technology headlines, BALLDONTLIE NBA, optional football-data.org fixtures, public GitHub repositories and Vercel deployments. Gold API is a fallback. Gemini summarizes only public feed facts through the Interactions API. Missing or failed feeds remain explicit while other feeds continue. Results cache for ten minutes per server process and HTTP responses are private/no-store.
+Priority TeachersVIP, NovaLens/Cris and Kganya balances come from the shared debtor ledger and open its existing editor. Payments update the same shared records across devices.

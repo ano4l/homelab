@@ -27,7 +27,7 @@ export default function KnowledgeSpaces({view,data,save,saving,Dialog,Field}) {
     {editing&&<KnowledgeEditor key={editing.id||'new'} group={group} record={editing} data={data} save={save} saving={saving} Dialog={Dialog} Field={Field} close={()=>setEditing(null)}/>}
   </>;
 }
-function KnowledgeEditor({group,record,data,save,saving,Dialog,Field,close}) {
+export function KnowledgeEditor({group,record,data,save,saving,Dialog,Field,close}) {
   const debt=group==='debtors',business=group==='directions';
   const [form,setForm]=useState({title:'',name:'',category:'',content:'',notes:'',source:'',nextAction:'',priority:'',status:'Outstanding',projectId:'',...record,amount:record.amountCents==null?'':String(record.amountCents/100),paid:String((record.paidCents||0)/100)}),[error,setError]=useState('');
   const set=(key,value)=>setForm(f=>({...f,[key]:value}));
