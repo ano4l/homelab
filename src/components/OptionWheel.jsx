@@ -6,7 +6,7 @@ const clampIndex = (index, count) => Math.max(0, Math.min(Math.round(index), cou
 export default function OptionWheel({
   items = [], defaultSelected = 0, onChange, onSelect,
   textColor = '#68686e', activeColor = '#121216', side = 'right',
-  fontSize = 2.1, spacing = 1.4, curve = 1, tilt = 6, fade = .14,
+  fontSize = 2.1, spacing = 1.4, curve = 1, tilt = 6, blur = .18, fade = .14,
   minOpacity = .28, inset = 40, loop = false, draggable = true, className = '',
 }) {
   const initialIndex = clampIndex(defaultSelected, items.length);
@@ -44,12 +44,17 @@ export default function OptionWheel({
     itemRefs.current.slice(0, items.length).forEach((item, index) => {
       if (!item) return;
       const distance = index - position;
+      const angle = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, distance * tilt * Math.PI / 180));
+      const radius = tilt > 0 ? rowHeightRef.current / (tilt * Math.PI / 180) : 0;
       item.style.setProperty('--ow-distance', Math.min(Math.abs(distance), 4));
       item.style.setProperty('--ow-opacity', Math.max(minOpacity, 1 - Math.abs(distance) * fade));
-      item.style.setProperty('--ow-curve-x', `${Math.min(100, distance * distance * 6 * curve) * (side === 'right' ? 1 : -1)}px`);
-      item.style.setProperty('--ow-rotation', `${Math.max(-24, Math.min(24, distance * tilt)) * (side === 'right' ? -1 : 1)}deg`);
+      item.style.setProperty('--ow-curve-x', `${radius * (1 - Math.cos(angle)) * curve * (side === 'right' ? 1 : -1)}px`);
+      item.style.setProperty('--ow-curve-y', `${radius ? radius * Math.sin(angle) - distance * rowHeightRef.current : 0}px`);
+      item.style.setProperty('--ow-rotation', `${angle * 180 / Math.PI * (side === 'right' ? -1 : 1)}deg`);
+      item.style.setProperty('--ow-blur', `${Math.abs(distance) * blur}px`);
+      item.style.setProperty('--ow-p', Math.max(0, 1 - Math.abs(distance)));
     });
-  }, [items.length, selectIndex, minOpacity, fade, curve, side, tilt]);
+  }, [items.length, selectIndex, minOpacity, fade, curve, side, tilt, blur]);
 
   const onScroll = useCallback(() => {
     if (frameRef.current !== null) return;
@@ -146,7 +151,6 @@ export default function OptionWheel({
     '--ow-row-height': `${Math.max(72, fontSize * spacing * 16)}px`,
   }}>
     <div className="option-wheel__viewport">
-      <div className="option-wheel__selection-band" aria-hidden="true"><span>→</span></div>
       <div ref={rootRef} role="listbox" tabIndex={0} aria-label="VK command menu"
         aria-activedescendant={items.length ? `${id}-${selectedIndex}` : undefined}
         className={`option-wheel option-wheel--${side}${dragging ? ' option-wheel--dragging' : ''}`}
