@@ -1,133 +1,169 @@
-import { useCallback, useEffect, useId, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import './OptionWheel.css';
 
-const OptionWheel = ({
-  items = [], defaultSelected = 0, onChange, onSelect, textColor = '#a6a6a6', activeColor = '#ffffff',
-  side = 'left', fontSize = 3, spacing = 1.4, curve = 1, tilt = 6, blur = 2, fade = 0.25,
-  minOpacity = 0.05, smoothing = 200, inset = 80, loop = false, draggable = true, className = ''
-}) => {
-  const rootRef = useRef(null); const itemRefs = useRef([]); const posRef = useRef(defaultSelected);
-  const targetRef = useRef(defaultSelected); const rafRef = useRef(null); const lastRef = useRef(0);
-  const cfgRef = useRef({}); const onChangeRef = useRef(onChange); const onSelectRef = useRef(onSelect); const selectedRef = useRef(defaultSelected);
-  const wheelTimerRef = useRef(null); const dragRef = useRef(null); const dragMovedRef = useRef(false);
-  const [selectedIndex, setSelectedIndex] = useState(defaultSelected); const [isDragging, setIsDragging] = useState(false);
-  const [nativeScroll, setNativeScroll] = useState(() => window.matchMedia('(max-width: 780px), (pointer: coarse)').matches);
-  const scrollFrameRef = useRef(null);
-  const optionId = useId();
-  const remPx = typeof window !== 'undefined' ? parseFloat(getComputedStyle(document.documentElement).fontSize) || 16 : 16;
+const clampIndex = (index, count) => Math.max(0, Math.min(Math.round(index), count - 1));
 
-  onChangeRef.current = onChange;
-  onSelectRef.current = onSelect;
-  cfgRef.current = { count: items.length, items, rowH: Math.max(fontSize * spacing * remPx, 1), curve, tilt, blur, fade, minOpacity, side, loop, smoothing, draggable };
+export default function OptionWheel({
+  items = [], defaultSelected = 0, onChange, onSelect,
+  textColor = '#68686e', activeColor = '#121216', side = 'right',
+  fontSize = 2.1, spacing = 1.4, curve = 1, tilt = 6, fade = .14,
+  minOpacity = .28, inset = 40, loop = false, draggable = true, className = '',
+}) {
+  const initialIndex = clampIndex(defaultSelected, items.length);
+  const [selectedIndex, setSelectedIndex] = useState(initialIndex);
+  const [dragging, setDragging] = useState(false);
+  const rootRef = useRef(null), itemRefs = useRef([]);
+  const selectedRef = useRef(initialIndex), rowHeightRef = useRef(72);
+  const layoutRef = useRef({ height: 0, rowHeight: 0 });
+  const frameRef = useRef(null), pointerRef = useRef(null), suppressClickRef = useRef(0);
+  const changeRef = useRef(onChange), selectRef = useRef(onSelect);
+  const id = useId();
+  changeRef.current = onChange;
+  selectRef.current = onSelect;
 
-  useEffect(() => {
-    const media = window.matchMedia('(max-width: 780px), (pointer: coarse)');
-    const change = () => setNativeScroll(media.matches);
-    media.addEventListener('change', change);
-    return () => media.removeEventListener('change', change);
-  }, []);
-
-  const scrollToIndex = useCallback((index, smooth = true) => {
-    const root = rootRef.current;
-    if (!root || !items.length) return;
-    const next = Math.max(0, Math.min(index, items.length - 1));
-    const item = itemRefs.current[next];
-    if (!item) return;
-    root.scrollTo({ top: item.offsetTop - (root.clientHeight - item.offsetHeight) / 2,
-      behavior: smooth && !window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'smooth' : 'instant' });
-  }, [items.length]);
-
-  const handleScroll = useCallback(() => {
-    if (scrollFrameRef.current != null) return;
-    scrollFrameRef.current = requestAnimationFrame(() => {
-      scrollFrameRef.current = null;
-      const root = rootRef.current;
-      if (!root || !items.length) return;
-      const center = root.scrollTop + root.clientHeight / 2;
-      let nearest = 0, distance = Infinity;
-      itemRefs.current.slice(0, items.length).forEach((item, index) => {
-        if (!item) return;
-        const delta = Math.abs(item.offsetTop + item.offsetHeight / 2 - center);
-        if (delta < distance) { nearest = index; distance = delta; }
-      });
-      if (nearest !== selectedRef.current) {
-        selectedRef.current = nearest;
-        targetRef.current = posRef.current = nearest;
-        setSelectedIndex(nearest);
-        onChangeRef.current?.(nearest, items[nearest]);
-      }
-    });
+  const selectIndex = useCallback(index => {
+    if (!items.length) return;
+    const next = clampIndex(index, items.length);
+    if (selectedRef.current !== next) {
+      selectedRef.current = next;
+      setSelectedIndex(next);
+      changeRef.current?.(next, items[next]);
+    }
   }, [items]);
 
-  useEffect(() => {
-    if (!nativeScroll) return;
+  const paint = useCallback(() => {
     const root = rootRef.current;
-    if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
-    rafRef.current = null;
-    itemRefs.current.forEach(item => item?.removeAttribute('style'));
-    const resize = new ResizeObserver(() => {
-      root.style.setProperty('--ow-padding', `${Math.max(0, (root.clientHeight - 64) / 2)}px`);
-      scrollToIndex(selectedRef.current, false);
+    if (!root || !items.length) return;
+    // A resize can make scroll-snap emit a scroll before ResizeObserver runs.
+    // Keep the current choice until the spacers and row size are updated.
+    if (root.clientHeight !== layoutRef.current.height || itemRefs.current[0]?.offsetHeight !== layoutRef.current.rowHeight) return;
+    // The two spacers center both end items. Scroll offsets therefore map
+    // directly to rows, without mixing offset-parent and viewport coordinates.
+    const position = root.scrollTop / rowHeightRef.current;
+    selectIndex(position);
+    itemRefs.current.slice(0, items.length).forEach((item, index) => {
+      if (!item) return;
+      const distance = index - position;
+      item.style.setProperty('--ow-distance', Math.min(Math.abs(distance), 4));
+      item.style.setProperty('--ow-opacity', Math.max(minOpacity, 1 - Math.abs(distance) * fade));
+      item.style.setProperty('--ow-curve-x', `${Math.min(100, distance * distance * 6 * curve) * (side === 'right' ? 1 : -1)}px`);
+      item.style.setProperty('--ow-rotation', `${Math.max(-24, Math.min(24, distance * tilt)) * (side === 'right' ? -1 : 1)}deg`);
     });
-    resize.observe(root);
-    scrollToIndex(selectedRef.current, false);
-    return () => { resize.disconnect(); if (scrollFrameRef.current != null) cancelAnimationFrame(scrollFrameRef.current); scrollFrameRef.current = null; };
-  }, [nativeScroll, scrollToIndex]);
+  }, [items.length, selectIndex, minOpacity, fade, curve, side, tilt]);
 
-  const runFrame = useCallback((now) => {
-    const dt = Math.min((now - lastRef.current) / 1000, 0.05); lastRef.current = now;
-    const cfg = cfgRef.current; const k = 1 - Math.exp(-dt / (Math.max(cfg.smoothing, 1) / 1000));
-    const target = targetRef.current; let next = posRef.current + (target - posRef.current) * k;
-    const settled = Math.abs(target - next) < 0.001; if (settled) next = target; posRef.current = next;
-    const mirror = cfg.side === 'right' ? -1 : 1; const tiltRad = (cfg.tilt * Math.PI) / 180;
-    const R = tiltRad > 0.0005 ? cfg.rowH / tiltRad : 0;
-    for (let i = 0; i < cfg.count; i += 1) {
-      const el = itemRefs.current[i]; if (!el) continue; let d = i - next;
-      if (cfg.loop && cfg.count > 1) { d = ((d % cfg.count) + cfg.count) % cfg.count; if (d > cfg.count / 2) d -= cfg.count; }
-      const dist = Math.abs(d); let x = 0; let y = d * cfg.rowH; let rot = 0;
-      if (R > 0) { const ang = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, d * tiltRad)); y = R * Math.sin(ang); x = -mirror * R * (1 - Math.cos(ang)) * cfg.curve; rot = mirror * ang * 180 / Math.PI; }
-      el.style.transform = `translate(${x.toFixed(2)}px, calc(${y.toFixed(2)}px - 50%)) rotate(${rot.toFixed(3)}deg)`;
-      el.style.opacity = String(Math.max(cfg.minOpacity, 1 - dist * cfg.fade)); el.style.filter = cfg.blur > 0 ? `blur(${(dist * cfg.blur).toFixed(2)}px)` : 'none';
-      el.style.setProperty('--ow-p', Math.max(0, 1 - Math.min(dist, 1)).toFixed(4));
-    }
-    rafRef.current = settled ? null : requestAnimationFrame(runFrame);
+  const onScroll = useCallback(() => {
+    if (frameRef.current !== null) return;
+    frameRef.current = requestAnimationFrame(() => {
+      frameRef.current = null;
+      paint();
+    });
+  }, [paint]);
+
+  const scrollToIndex = useCallback(index => {
+    const root = rootRef.current;
+    if (!root || !items.length) return;
+    const next = clampIndex(index, items.length);
+    root.scrollTo({ top: next * rowHeightRef.current, behavior: 'instant' });
+    selectIndex(next);
+    paint();
+  }, [items.length, selectIndex, paint]);
+
+  useLayoutEffect(() => {
+    const root = rootRef.current;
+    const resize = () => {
+      rowHeightRef.current = itemRefs.current[0]?.offsetHeight || 72;
+      layoutRef.current = { height: root.clientHeight, rowHeight: rowHeightRef.current };
+      root.style.scrollSnapType = 'none';
+      root.style.setProperty('--ow-padding', `${Math.max(0, (root.clientHeight - rowHeightRef.current) / 2)}px`);
+      scrollToIndex(selectedRef.current);
+      root.style.scrollSnapType = '';
+    };
+    const observer = new ResizeObserver(resize);
+    observer.observe(root);
+    if (itemRefs.current[0]) observer.observe(itemRefs.current[0]);
+    resize();
+    return () => observer.disconnect();
+  }, [scrollToIndex]);
+
+  useEffect(() => () => {
+    if (frameRef.current !== null) cancelAnimationFrame(frameRef.current);
   }, []);
-  const startLoop = useCallback(() => { if (rafRef.current != null) cancelAnimationFrame(rafRef.current); lastRef.current = performance.now(); rafRef.current = requestAnimationFrame(runFrame); }, [runFrame]);
-  const applyTarget = useCallback((value, snap) => {
-    const cfg = cfgRef.current; let v = value; if (!cfg.loop) v = Math.min(Math.max(v, 0), Math.max(cfg.count - 1, 0)); if (snap) v = Math.round(v);
-    targetRef.current = v; const idx = ((Math.round(v) % cfg.count) + cfg.count) % cfg.count;
-    if (idx !== selectedRef.current) { selectedRef.current = idx; setSelectedIndex(idx); onChangeRef.current?.(idx, cfg.items[idx]); }
-    startLoop();
-  }, [startLoop]);
-  useEffect(() => {
-    if (nativeScroll) return;
-    const el = rootRef.current; if (!el) return;
-    const onWheel = (event) => { event.preventDefault(); const cfg = cfgRef.current; const delta = event.deltaMode === 1 ? event.deltaY * 24 : event.deltaY; const step = Math.max(-1, Math.min(1, delta / cfg.rowH)); applyTarget(targetRef.current + step, false); if (wheelTimerRef.current) clearTimeout(wheelTimerRef.current); wheelTimerRef.current = setTimeout(() => applyTarget(targetRef.current, true), 140); };
-    el.addEventListener('wheel', onWheel, { passive: false }); return () => { el.removeEventListener('wheel', onWheel); if (wheelTimerRef.current) clearTimeout(wheelTimerRef.current); };
-  }, [applyTarget, nativeScroll]);
-  const handlePointerDown = useCallback((event) => { if (!cfgRef.current.draggable) return; dragRef.current = { y: event.clientY, start: targetRef.current, id: event.pointerId }; dragMovedRef.current = false; setIsDragging(true); }, []);
-  const handlePointerMove = useCallback((event) => { const drag = dragRef.current; if (!drag) return; const dy = event.clientY - drag.y; if (!dragMovedRef.current && Math.abs(dy) > 4) { dragMovedRef.current = true; rootRef.current?.setPointerCapture(drag.id); } if (dragMovedRef.current) applyTarget(drag.start - dy / cfgRef.current.rowH, false); }, [applyTarget]);
-  const handlePointerEnd = useCallback(() => { if (!dragRef.current) return; dragRef.current = null; setIsDragging(false); if (dragMovedRef.current) applyTarget(targetRef.current, true); }, [applyTarget]);
-  const handleItemClick = useCallback((index) => { if (dragMovedRef.current) return; const cfg = cfgRef.current; const cur = targetRef.current; let d = index - (((cur % cfg.count) + cfg.count) % cfg.count); if (cfg.loop && cfg.count > 1) { if (d > cfg.count / 2) d -= cfg.count; else if (d < -cfg.count / 2) d += cfg.count; } applyTarget(cur + d, true); onSelectRef.current?.(index, cfg.items[index]); }, [applyTarget]);
-  const handleKeyDown = useCallback((event) => {
-    if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); const cfg = cfgRef.current; const index = selectedRef.current; onSelectRef.current?.(index, cfg.items[index]); return; }
-    if (event.key === 'Home' || event.key === 'End') { event.preventDefault(); const index = event.key === 'Home' ? 0 : items.length - 1; if (nativeScroll) scrollToIndex(index); else applyTarget(index, true); return; }
-    const delta = event.key === 'ArrowUp' || event.key === 'ArrowLeft' ? -1 : event.key === 'ArrowDown' || event.key === 'ArrowRight' ? 1 : null;
-    if (delta == null) return; event.preventDefault(); applyTarget(Math.round(targetRef.current) + delta, true);
-    if (nativeScroll) { if (rafRef.current != null) cancelAnimationFrame(rafRef.current); rafRef.current = null; scrollToIndex(Math.round(targetRef.current)); }
-  }, [applyTarget, nativeScroll, scrollToIndex, items.length]);
-  useEffect(() => {
-    if (!nativeScroll) { rootRef.current.scrollTop = 0; applyTarget(targetRef.current, false); }
-  }, [nativeScroll, items, fontSize, spacing, curve, tilt, blur, fade, minOpacity, side, loop, smoothing, applyTarget]);
-  useEffect(() => () => { if (rafRef.current != null) cancelAnimationFrame(rafRef.current); }, []);
 
-  return <div className={`option-wheel-shell${nativeScroll ? ' option-wheel-shell--native' : ''}`}>
-    {nativeScroll && <div className="option-wheel__selection-band" aria-hidden="true"/>}
-    <div ref={rootRef} role="listbox" tabIndex={0} aria-label="VK command menu" aria-activedescendant={`${optionId}-${selectedIndex}`} className={`option-wheel${nativeScroll ? ' option-wheel--native' : ''}${side === 'right' ? ' option-wheel--right' : ''}${isDragging ? ' option-wheel--dragging' : ''}${className ? ` ${className}` : ''}`} style={{ '--ow-text-color': textColor, '--ow-active-color': activeColor, '--ow-font-size': `${fontSize}rem`, '--ow-inset': `${inset}px` }} onScroll={nativeScroll ? handleScroll : undefined} onPointerDown={nativeScroll ? undefined : handlePointerDown} onPointerMove={nativeScroll ? undefined : handlePointerMove} onPointerUp={nativeScroll ? undefined : handlePointerEnd} onPointerCancel={nativeScroll ? undefined : handlePointerEnd} onKeyDown={handleKeyDown}>
-      {items.map((label, index) => <div id={`${optionId}-${index}`} key={`${label}-${index}`} ref={(el) => { itemRefs.current[index] = el; }} role="option" aria-selected={selectedIndex === index} className={`option-wheel__item${selectedIndex === index ? ' option-wheel__item--selected' : ''}`} onClick={() => nativeScroll ? onSelectRef.current?.(index, items[index]) : handleItemClick(index)}>{label}</div>)}
+  function pointerDown(event) {
+    if (event.button !== 0 && event.pointerType === 'mouse') return;
+    pointerRef.current = { id: event.pointerId, type: event.pointerType, y: event.clientY, top: rootRef.current.scrollTop, moved: false };
+  }
+  function pointerMove(event) {
+    const pointer = pointerRef.current;
+    if (!pointer || pointer.id !== event.pointerId) return;
+    const delta = event.clientY - pointer.y;
+    if (Math.abs(delta) > 6) pointer.moved = true;
+    if (pointer.moved && pointer.type === 'mouse' && draggable) {
+      rootRef.current.setPointerCapture(pointer.id);
+      setDragging(true);
+      // Only mouse dragging is implemented here. Touch scrolling and inertia
+      // belong to the browser and must never be cancelled.
+      rootRef.current.scrollTop = pointer.top - delta;
+    }
+  }
+  function pointerEnd(event) {
+    const pointer = pointerRef.current;
+    if (!pointer || pointer.id !== event.pointerId) return;
+    if (pointer.moved) {
+      suppressClickRef.current = performance.now() + 300;
+      if (pointer.type === 'mouse') scrollToIndex(rootRef.current.scrollTop / rowHeightRef.current);
+    }
+    if (rootRef.current.hasPointerCapture(pointer.id)) rootRef.current.releasePointerCapture(pointer.id);
+    pointerRef.current = null;
+    setDragging(false);
+  }
+  function openIndex(index) {
+    if (!items.length || performance.now() < suppressClickRef.current) return;
+    selectIndex(index);
+    selectRef.current?.(index, items[index]);
+  }
+  function keyDown(event) {
+    if (!items.length) return;
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault(); openIndex(selectedRef.current); return;
+    }
+    let next;
+    if (event.key === 'Home') next = 0;
+    else if (event.key === 'End') next = items.length - 1;
+    else if (['ArrowUp', 'ArrowLeft'].includes(event.key)) next = selectedRef.current - 1;
+    else if (['ArrowDown', 'ArrowRight'].includes(event.key)) next = selectedRef.current + 1;
+    else if (event.key === 'PageUp') next = selectedRef.current - 3;
+    else if (event.key === 'PageDown') next = selectedRef.current + 3;
+    else return;
+    event.preventDefault();
+    if (loop) next = (next + items.length) % items.length;
+    scrollToIndex(next);
+  }
+
+  return <div className={`option-wheel-shell${className ? ` ${className}` : ''}`} style={{
+    '--ow-text-color': textColor, '--ow-active-color': activeColor,
+    '--ow-font-size': `${fontSize}rem`, '--ow-inset': `${inset}px`,
+    '--ow-row-height': `${Math.max(72, fontSize * spacing * 16)}px`,
+  }}>
+    <div className="option-wheel__viewport">
+      <div className="option-wheel__selection-band" aria-hidden="true"><span>→</span></div>
+      <div ref={rootRef} role="listbox" tabIndex={0} aria-label="VK command menu"
+        aria-activedescendant={items.length ? `${id}-${selectedIndex}` : undefined}
+        className={`option-wheel option-wheel--${side}${dragging ? ' option-wheel--dragging' : ''}`}
+        onScroll={onScroll} onKeyDown={keyDown} onPointerDown={pointerDown}
+        onPointerMove={pointerMove} onPointerUp={pointerEnd} onPointerCancel={pointerEnd}>
+        <div className="option-wheel__spacer" aria-hidden="true"/>
+        {items.map((label, index) => <div id={`${id}-${index}`} key={`${label}-${index}`}
+          ref={element => { itemRefs.current[index] = element; }} role="option"
+          aria-selected={selectedIndex === index} aria-posinset={index + 1} aria-setsize={items.length}
+          className={`option-wheel__item${selectedIndex === index ? ' option-wheel__item--selected' : ''}`}
+          onClick={() => openIndex(index)}><span>{label}</span></div>)}
+        <div className="option-wheel__spacer" aria-hidden="true"/>
+      </div>
     </div>
-    {nativeScroll && <button className="option-wheel__open" onClick={() => onSelectRef.current?.(selectedRef.current, items[selectedRef.current])}>Open {items[selectedIndex]} <span aria-hidden="true">→</span></button>}
+    <div className="option-wheel__footer">
+      <span className="option-wheel__position" aria-hidden="true">{String(selectedIndex + 1).padStart(2, '0')} / {String(items.length).padStart(2, '0')}</span>
+      <button className="option-wheel__open" disabled={!items.length} onClick={() => openIndex(selectedRef.current)}>Open {items[selectedIndex]} <span aria-hidden="true">→</span></button>
+    </div>
   </div>;
-};
-
-export default OptionWheel;
+}
