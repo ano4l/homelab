@@ -1,5 +1,5 @@
 {
-  "functions": { "api/daily-report.js": { "maxDuration": 90 } },
+  "functions": { "api/daily-report.js": { "maxDuration": 90 }, "api/assistant.js": { "maxDuration": 70 } },
   "routes": [
     { "handle": "filesystem" },
     { "src": "/.*", "dest": "/index.html" }

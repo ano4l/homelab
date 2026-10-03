@@ -12,7 +12,7 @@ export function priorityDebtors(debtors) {
   })).filter(Boolean);
 }
 function SourceLink({url,children}){const href=safeUrl(url);return href?<a href={href} target="_blank" rel="noreferrer">{children}<ArrowRight size={13}/></a>:<span>{children}</span>;}
-export default function DashboardBriefing({data,now,onEditDebtor,onOpenDebtors}) {
+export default function DashboardBriefing({data,now,onEditDebtor,onOpenDebtors,onOpenProject,onClearFocus}) {
   const [report,setReport]=useState(null),[busy,setBusy]=useState(false),[error,setError]=useState('');
   const refresh=useCallback(async signal=>{
     setBusy(true);setError('');
@@ -32,10 +32,12 @@ export default function DashboardBriefing({data,now,onEditDebtor,onOpenDebtors})
     return()=>{controller.abort();clearInterval(interval);};
   },[refresh]);
   const priority=priorityDebtors(data.debtors),totals=debtorTotals(priority);
+  const focus=data.settings.dashboardFocus,focusedProject=data.projects.find(p=>p.id===focus?.projectId),focusedDebtor=data.debtors.find(d=>d.id===focus?.debtorId);
   const today=todayKey(now),overdue=data.tasks.filter(t=>!t.done&&t.deadline&&t.deadline<today).length;
   const blocked=data.projects.filter(p=>p.blocker?.trim()).length;
   const markets=['XAU/USD','BTC','ETH','USD/ZAR'].map(symbol=>report?.markets.find(m=>m.symbol===symbol)||{symbol,name:{'XAU/USD':'Gold',BTC:'Bitcoin',ETH:'Ethereum','USD/ZAR':'USD / ZAR'}[symbol],usd:null});
   return <div className="dashboard-briefing">
+    {(focusedProject||focusedDebtor)&&<section className="dashboard-focus"><div><span className="eyebrow">YOUR FOCUS / CHOSEN WITH VK</span><h2>{focusedProject?.name||focusedDebtor?.name}</h2><p>{focusedProject?focusedProject.nextAction||focusedProject.blocker||'Open this project to set its next move.':focusedDebtor?.status==='Paid'?'Payment complete.': 'Keep this follow-up in sight.'}</p></div><div><button className="quiet" onClick={()=>focusedProject?onOpenProject(focusedProject):onEditDebtor(focusedDebtor)}>Open<ArrowRight size={14}/></button><button className="text-button" onClick={onClearFocus}>Clear focus</button></div></section>}
     <section className="priority-debtors" aria-labelledby="priority-debtors-title">
       <div className="section-head"><div><span className="eyebrow">COLLECTIONS / PRIORITY</span><h2 id="priority-debtors-title">Follow up first.</h2></div><button className="text-button" onClick={onOpenDebtors}>All debtors<ArrowRight size={14}/></button></div>
       <div className="priority-debtor-grid">{priority.map(debtor=>{
