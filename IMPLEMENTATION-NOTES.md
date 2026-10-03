@@ -43,3 +43,7 @@ Priority TeachersVIP, NovaLens/Cris and Kganya balances come from the shared deb
 
 ## Guided assistant intake
 Home capture now asks follow-up questions with Gemini Interactions before proposing a typed action: a task, project next action/blocker update, dashboard focus, or inbox thought. Suggestions remain drafts until the owner reviews and applies them. The assistant endpoint verifies the owner with Supabase Auth and an RLS workspace read, caps request size, whitelists action types and IDs, and keeps provider keys server-only. The browser sends the conversation plus limited project/debtor names and open task titles to Gemini; no debt balances are included. The direct thought path remains available when AI is unwanted or unavailable. Focus is saved in workspace settings and syncs across devices. Vercel's parsed request.body and Vite's raw stream are both supported.
+
+
+## Installed-app updates
+The PWA worker activates after caching a complete shell. Navigation now checks the network first, updates the offline HTML fallback, and uses that fallback only when offline. The client checks for worker updates on focus and periodically and shows a Reload app control when a new worker takes over. Existing installs running the previous cache-first worker may need one manual reload after this release; later releases show the in-app update control. API responses remain outside the shell cache.
